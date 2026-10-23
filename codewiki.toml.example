@@ -1,0 +1,61 @@
+# codewiki 配置示例（复制到项目根目录为 codewiki.toml）
+# 全部段落都可缺省：不提供本文件也能跑（默认值 + 诊断提示）。
+
+[project]
+name = "我的项目"
+lang = "zh"
+
+[languages]
+# 解析语言白名单；不在表内的扩展名仅登记为资源文件
+python = { ext = [".py"], analyzer = "ast" }
+typescript = { ext = [".ts", ".tsx"], analyzer = "treesitter" }
+go = { ext = [".go"], analyzer = "treesitter" }
+
+[analysis]
+# 低于该置信度的边不进宏观图
+min_confidence = 0.5
+# 单图节点上限，超过自动按层分包
+max_nodes = 300
+exclude = ["tests", "scripts"]
+
+[architecture]
+# 系统架构层级（用于宏观架构图）；匹配按**最长前缀优先**
+[[architecture.layers]]
+name = "接口层"
+paths = ["app/api"]
+color = "#B3E5FC"
+
+[[architecture.layers]]
+name = "服务层"
+paths = ["app/services"]
+color = "#C8E6C9"
+
+[[architecture.layers]]
+name = "数据层"
+paths = ["app/persistence", "app/models"]
+color = "#FFE0B2"
+
+# 人工注解（AI 建议合并后也落在这里）
+[[annotations]]
+target = "mod::app/services/order.py"
+label = "订单核心"
+note = "下单主链路；并发限制见 run_order 的 Redis 锁。"
+
+[ai]
+# 整段缺失等同 enabled = false（纯静态模式，analyze 全功能可用）
+enabled = false
+# OpenAI 兼容端点：可指向本地 Ollama / vLLM 或企业内网网关
+base_url = "http://localhost:11434/v1"
+model = "qwen2.5-coder"
+# 单轮 token 硬上限；超预算优雅停止并标注"未完成模块"
+budget_tokens = 200000
+max_retries = 2
+timeout_s = 60
+# 标注取前 N 个热点模块
+top_n = 30
+# 产出策略：review-file（默认，写建议文件）/ dry-run / confirm / auto
+write_back = "review-file"
+# 拓扑感知缓存键（可选优化项，默认关闭）
+cache_include_topology = false
+# L2 真实渲染校验（需 Node 24 LTS + mermaid-cli ≥12）
+l2_validate = false

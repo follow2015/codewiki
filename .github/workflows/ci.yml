@@ -1,0 +1,34 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      - name: 安装
+        run: python -m pip install -e .
+
+      - name: 语法检查（compileall）
+        run: python -m compileall -q codewiki
+
+      - name: 端到端冒烟（对示例仓库出产物）
+        run: |
+          mkdir -p /tmp/sample/mypkg
+          printf 'X = 1\n' > /tmp/sample/mypkg/mod.py
+          printf '[project]\nname = "sample"\n' > /tmp/sample/pyproject.toml
+          codewiki analyze --src /tmp/sample --out /tmp/sample-out
+          test -f /tmp/sample-out/index.html
+          test -f /tmp/sample-out/data/codewiki.json
+
+      - name: 机密扫描
+        run: python scripts/scan-secrets.py $(git ls-files)
