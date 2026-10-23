@@ -36,7 +36,6 @@ from codewiki.models import (
 )
 from codewiki.schemas import Diagnostic
 
-
 MAX_REEXPORT_HOPS = 10
 
 

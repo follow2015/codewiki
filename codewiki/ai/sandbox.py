@@ -170,8 +170,14 @@ def _is_path_arg(arg: str) -> bool:
 
 
 def _jail_check(arg: str, *, root: Path) -> None:
-    """路径参数越界即拒绝（``realpath`` 展开 ``..`` 与符号链接）。"""
-    if not _is_path_arg(arg):
+    """路径参数越界即拒绝（``realpath`` 展开 ``..`` 与符号链接）。
+
+    **所有**非选项参数都要过这道检查 —— 曾经按 :func:`_is_path_arg`
+    （「含 ``/`` 或 ``.``」）筛选，于是 ``ls -R dirlink`` 里指向仓库外的符号
+    链接目录整条漏检，能列出仓库外的目录名（外部评审实测面）。不含分隔符的
+    取值（``grep`` 的模式、``find`` 的谓词取值）解析后仍落在 root 内，不会被误拒。
+    """
+    if arg.startswith("-") or not arg:
         return
     candidate = (Path(arg) if Path(arg).is_absolute() else root / arg).resolve()
     if candidate != root and root not in candidate.parents:

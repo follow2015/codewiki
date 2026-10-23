@@ -28,7 +28,6 @@ MERMAID_ASSET = "assets/mermaid.min.js"
 
 PACKAGE_ASSET = Path(__file__).resolve().parent.parent / "assets" / "mermaid.min.js"
 
-
 _FENCE_RE = re.compile(r"^```(\w*)\s*$")
 _TABLE_SEP_RE = re.compile(r"^\|(\s*:?-{3,}:?\s*\|)+$")
 _LINK_RE = re.compile(r"\[([^\]]+)\]\(([^)\s]+)\)")
@@ -142,7 +141,6 @@ def md_to_html(md: str) -> str:
 
     flush_para()
     return "\n".join(out)
-
 
 
 _PAGE_STYLES = """  :root {

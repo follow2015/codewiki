@@ -144,8 +144,6 @@ def _first_line(text_value: str | None) -> str | None:
     return text_value.strip().splitlines()[0]
 
 
-
-
 def symbol_name(symbol: str) -> str:
     """``<scheme> <manager> <package> <version> <descriptor>`` → 可读名字。
 

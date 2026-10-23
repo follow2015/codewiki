@@ -15,7 +15,11 @@
 """
 from __future__ import annotations
 
+import json
+import os
 import re
+import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -25,6 +29,24 @@ from codewiki.ai.sandbox import ShellDenied, execute_shell
 DEFAULT_MAX_CHARS = 24_000
 DEFAULT_MAX_HITS = 50
 MAX_PATTERN_CHARS = 500
+REGEX_TIMEOUT_S = 10.0
+
+_SECRET_FILE_NAMES = frozenset(
+    {
+        ".netrc",
+        ".htpasswd",
+        ".npmrc",
+        ".pypirc",
+        ".git-credentials",
+        "id_rsa",
+        "id_dsa",
+        "id_ecdsa",
+        "id_ed25519",
+        "credentials.json",
+    }
+)
+_SECRET_FILE_SUFFIXES = (".pem", ".key", ".p12", ".pfx", ".jks", ".keystore", ".env")
+_SECRET_FILE_ALLOW = frozenset({".env.example", ".env.sample", ".env.template", ".env.dist"})
 
 DELIM_BEGIN = "<<<CODEWIKI_UNTRUSTED_DATA>>>"
 DELIM_END = "<<<END_CODEWIKI_UNTRUSTED_DATA>>>"
@@ -79,6 +101,22 @@ def resolve_in_repo(path: str | Path, *, repo_root: Path) -> Path:
     return target
 
 
+def _is_secret_file(path: Path) -> bool:
+    """判断是否"读都不该读"的密钥载体（``.env`` / 私钥 / 凭据文件）。
+
+    脱敏是**读后**补救，形如 PEM 的多行结构、自定义格式的凭据文件都可能漏网；
+    对这几类文件直接拒读，比"读了再抹"稳。模板文件（``.env.example``）放行。
+    """
+    name = path.name.lower()
+    if name in _SECRET_FILE_ALLOW:
+        return False
+    if name in _SECRET_FILE_NAMES or name.startswith(("id_rsa", "id_ed25519", "id_ecdsa")):
+        return True
+    if name == ".env" or name.startswith(".env."):
+        return True
+    return name.endswith(_SECRET_FILE_SUFFIXES)
+
+
 def read_file(
     path: str,
     *,
@@ -98,6 +136,11 @@ def read_file(
         if audit:
             audit.record(tool="read_file", args={"path": path}, outcome="denied", detail=str(exc))
         raise
+    if _is_secret_file(target):
+        detail = f"拒绝读取疑似密钥文件: {path}（.env / 私钥 / 凭据文件不入模型上下文）"
+        if audit:
+            audit.record(tool="read_file", args={"path": path}, outcome="denied", detail=detail)
+        raise ToolError(detail)
     if not target.is_file():
         raise ToolError(f"不是文件（或不存在）: {path}")
 
@@ -135,48 +178,38 @@ def search_codebase(
     - 模式长度上限 + **嵌套量词静态拒绝**（``(x+x+)+y`` 一类灾难性回溯模式
       直接拒 —— 注意不能用线程超时：``re`` 匹配在 C 层持有 GIL 不释放，
       主线程连 join 超时都醒不过来，实测整场测试挂死）；
+    - 匹配整体放进**独立子进程并带硬超时**：静态检查只能认单层括号
+      （``((a+))+$`` 之类能绕过），进程级超时才能兜住漏网形状；
     - 单行截断后再匹配（回溯代价随输入长度指数增长，长行先砍）；
-    - ``files`` 参数逐个过路径 jail —— ``root / "/abs"`` 会整体替换 root，
-      绝对路径与 ``..`` 一律跳过，不当报错也不泄漏。
+    - 候选文件**逐个 resolve** —— 仓库里指向外部的符号链接（``evil -> /etc/x``）
+      曾经被 ``root / rel`` 原样读走，等于绕过 read_file 的 jail；
+    - 返回给模型的 ``path`` 一律是**相对仓库根**的形式（绝对路径会把本机目录
+      结构带进上下文，也和提示词里 ``file:line`` 的引用约定不一致）。
     """
     if len(keyword) > MAX_PATTERN_CHARS:
         raise ToolError(f"正则过长（{len(keyword)} > {MAX_PATTERN_CHARS} 字符），拒绝执行")
     _reject_catastrophic_backtracking(keyword)
     try:
-        pattern = re.compile(keyword)
+        re.compile(keyword)
     except re.error as exc:
         raise ToolError(f"非法正则: {exc}") from exc
 
     root = repo_root.resolve()
-    if files is not None:
-        candidates = []
-        for rel in files:
-            try:
-                target = resolve_in_repo(str(rel), repo_root=root)
-            except ToolError:
-                continue
-            candidates.append(target)
-    else:
-        candidates = [root / rel for rel in _iter_text_files(root)]
-
-    hits: list[dict] = []
-    for target in candidates:
+    requested = [str(rel) for rel in files] if files is not None else _iter_text_files(root)
+    candidates: list[str] = []
+    for rel in requested:
         try:
-            content = target.read_text(encoding="utf-8", errors="replace")
-        except OSError:
+            target = resolve_in_repo(rel, repo_root=root)
+        except ToolError:
             continue
-        for lineno, line in enumerate(content.splitlines(), start=1):
-            if pattern.search(line[:MAX_LINE_CHARS]):
-                hits.append({"path": str(target), "line": lineno, "text": line.strip()[:200]})
-                if len(hits) >= max_hits:
-                    if audit:
-                        audit.record(
-                            tool="search_codebase",
-                            args={"keyword": keyword[:120]},
-                            outcome="ok",
-                            detail=f"{len(hits)} hits",
-                        )
-                    return hits
+        if not target.is_file():
+            continue
+        try:
+            candidates.append(str(target.relative_to(root)))
+        except ValueError:
+            continue
+
+    hits = _scan_in_subprocess(keyword, root=root, candidates=candidates, max_hits=max_hits)
     if audit:
         audit.record(
             tool="search_codebase",
@@ -185,6 +218,64 @@ def search_codebase(
             detail=f"{len(hits)} hits",
         )
     return hits
+
+
+def _scan_in_subprocess(keyword: str, *, root: Path, candidates: list[str], max_hits: int) -> list[dict]:
+    """在子进程里跑正则；超时即中止（灾难性回溯到此为止）。
+
+    ``re`` 匹配持 GIL，进程内没有可行的超时手段 —— 这是**唯一**能兜住静态检查
+    漏网形状的做法（外部评审：``((a+))+$`` 26 字符就要 5.75 秒，每加一字符翻倍）。
+    子进程环境只留 PATH + PYTHONPATH：密钥类的环境变量不往下传。
+    """
+    if not candidates:
+        return []
+
+    payload = json.dumps(
+        {
+            "pattern": keyword,
+            "root": str(root),
+            "files": candidates,
+            "max_line_chars": MAX_LINE_CHARS,
+            "max_hits": max_hits,
+        }
+    )
+    env = {
+        "PATH": os.environ.get("PATH", ""),
+        "PYTHONPATH": str(Path(__file__).resolve().parent.parent.parent),
+        "PYTHONIOENCODING": "utf-8",
+    }
+    try:
+        proc = subprocess.run(  # noqa: S603 - argv 固定，无 shell
+            [sys.executable, "-m", "codewiki.ai._regex_worker"],
+            input=payload,
+            capture_output=True,
+            text=True,
+            timeout=REGEX_TIMEOUT_S,
+            env=env,
+            check=False,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise ToolError(
+            f"正则匹配超过 {REGEX_TIMEOUT_S:g} 秒已中止（疑似灾难性回溯），请改写模式"
+        ) from exc
+    except OSError as exc:
+        raise ToolError(f"正则扫描子进程无法启动: {exc}") from exc
+
+    if proc.returncode != 0:
+        raise ToolError(f"正则扫描失败（退出码 {proc.returncode}）: {proc.stdout[:200]}")
+    try:
+        raw = json.loads(proc.stdout or "[]")
+    except json.JSONDecodeError as exc:
+        raise ToolError("正则扫描返回不是合法 JSON") from exc
+    if isinstance(raw, dict) and "error" in raw:
+        raise ToolError(f"正则扫描失败: {raw['error']}")
+
+    from codewiki.ai.audit import redact as _redact
+
+    return [
+        {"path": hit["path"], "line": hit["line"], "text": _redact(hit["text"])}
+        for hit in raw
+    ]
 
 
 MAX_LINE_CHARS = 1000

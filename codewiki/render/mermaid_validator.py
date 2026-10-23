@@ -105,7 +105,6 @@ def is_valid(text: str) -> bool:
     return not validate_l1(text)
 
 
-
 MMDC_CANDIDATES: tuple[str, ...] = ("mmdc", "npx")
 
 

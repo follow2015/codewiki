@@ -114,8 +114,6 @@ class Edge(BaseModel):
     evidence: str | None = None
 
 
-
-
 class ImportFact(BaseModel):
     """一条 import 事实。
 

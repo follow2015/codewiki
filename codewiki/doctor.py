@@ -62,8 +62,6 @@ def render_report(checks: list[Check]) -> str:
     return "\n".join(lines) + "\n"
 
 
-
-
 def _check_python() -> Check:
     version = sys.version_info[:3]
     text = ".".join(str(v) for v in version)
@@ -145,32 +143,41 @@ def _check_ai(*, probe: bool) -> Check:
     import os
     from pathlib import Path
 
+    from codewiki.ai.client import LLMError, OpenAICompatClient, probe_connectivity, resolve_base_url
+
     api_key = os.environ.get("OPENAI_API_KEY", "")
     env_base = os.environ.get("OPENAI_BASE_URL", "")
     model = None
-    base_url = env_base or None
+    config_base = None
     try:
         from codewiki.config import CONFIG_FILENAME, load_config
 
         cfg = load_config(Path.cwd() / CONFIG_FILENAME)
         model = cfg.ai.model
-        base_url = base_url or cfg.ai.base_url
+        config_base = cfg.ai.base_url
     except Exception:  # noqa: BLE001 - doctor 不该因配置坏而崩（那是 load_config 的职责）
         pass
+
+    try:
+        base_url, base_warning = resolve_base_url(cli_value=None, config_value=config_base)
+    except LLMError as exc:
+        return Check("warning", "AI", f"base_url 不可用：{exc}")
 
     if not model and not env_base:
         return Check("info", "AI", "未配置：纯静态模式（analyze 全功能可用）")
 
     display = model or "(由 base_url 决定)"
-    if not api_key and not (base_url and base_url.startswith(("http://localhost", "http://127.0.0.1"))):
+    if not api_key and not base_url.startswith(("http://localhost", "http://127.0.0.1", "https://localhost")):
         return Check("warning", "AI", f"模型 {display} 已配置，但未设置 OPENAI_API_KEY")
 
     if not probe:
+        if base_warning:
+            return Check("warning", "AI", f"已配置 {display}，但{base_warning}")
         return Check("ok", "AI", f"已配置 {display}（未探测连通性；加 --probe 才真连一次）")
 
-    from codewiki.ai.client import OpenAICompatClient, probe_connectivity
-
     ok, detail = probe_connectivity(OpenAICompatClient(model=model or "codewiki-probe", base_url=base_url))
+    if base_warning:
+        detail = f"{detail}；注意：{base_warning}"
     return Check("ok" if ok else "warning", "AI", detail)
 
 

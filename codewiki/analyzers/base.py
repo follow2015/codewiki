@@ -39,8 +39,6 @@ class Analyzer(Protocol):
         ...
 
 
-
-
 class AnalyzerRegistry:
     """语言 + 后端 → Analyzer 工厂的注册表。
 
