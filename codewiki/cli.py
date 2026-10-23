@@ -14,7 +14,7 @@ from codewiki import __version__
 from codewiki.ai.agent import AgentLoop
 from codewiki.ai.annotate import annotate_modules, write_suggestions
 from codewiki.ai.audit import AUDIT_FILENAME, AuditLog
-from codewiki.ai.client import OpenAICompatClient
+from codewiki.ai.client import OpenAICompatClient, resolve_base_url
 from codewiki.ai.merge import merge_annotations, render_merge_report
 from codewiki.analyzers import REGISTRY, register_defaults
 from codewiki.config import CONFIG_FILENAME, ConfigError, load_config
@@ -427,9 +427,12 @@ def _ai_annotate_cmd(args: argparse.Namespace) -> int:
     out_dir.mkdir(parents=True, exist_ok=True)
     cache_root = Path(args.cache_dir).resolve() if args.cache_dir else (src_root or Path.cwd())
 
+    base_url, base_url_warning = resolve_base_url(cli_value=args.base_url, config_value=cfg.ai.base_url)
+    if base_url_warning:
+        print(f"warning: {base_url_warning}", file=sys.stderr)
     client = OpenAICompatClient(
         model=model,
-        base_url=args.base_url or cfg.ai.base_url,
+        base_url=base_url,
         timeout_s=cfg.ai.timeout_s,
         max_retries=cfg.ai.max_retries,
     )
@@ -713,10 +716,52 @@ def _read_question_from_stdin() -> str:
     return sys.stdin.read().strip()
 
 
+_INIT_TEMPLATE = """# codewiki 配置（由 `codewiki init` 生成）
+# 完整字段见 codewiki.toml.example；编辑器补全用 wiki-output/data/codewiki.schema.json
+
+[project]
+name = "my-project"            # 产物标题
+
+[analysis]
+min_confidence = 0.5           # 低于该置信度的边不进结果
+max_nodes = 300                # 宏观图单张节点上限（超出自动按层分包）
+
+# 架构分层（按需增删；paths 是前缀匹配）
+[[architecture.layers]]
+name = "接口层"
+paths = ["api/", "routes/"]
+
+[[architecture.layers]]
+name = "服务层"
+paths = ["services/", "domain/"]
+
+[[architecture.layers]]
+name = "数据层"
+paths = ["models/", "db/"]
+"""
+
+
+def _init_cmd(args) -> int:
+    """生成 ``codewiki.toml`` 模板（配置错误提示里引用的就是本命令）。"""
+    target = Path(args.path) / CONFIG_FILENAME
+    if target.exists():
+        print(f"error: {target} 已存在，不覆盖（要重生成请先删除）", file=sys.stderr)
+        return 2
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(_INIT_TEMPLATE, encoding="utf-8")
+    print(f"已生成 {target}")
+    print("下一步: codewiki analyze --src <仓库根> --out wiki-output")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="codewiki", description="代码架构知识图谱与文档生成器")
     parser.add_argument("--version", action="version", version=f"codewiki {__version__}")
     sub = parser.add_subparsers(dest="command", required=True)
+
+    init_cmd = sub.add_parser("init", help="生成 codewiki.toml 模板（不覆盖已存在的配置）")
+    init_cmd.add_argument("--path", default=".", help="生成位置（默认当前目录）")
+    init_cmd.set_defaults(func=_init_cmd)
 
     analyze = sub.add_parser("analyze", help="纯静态分析，产出标准数据包")
     analyze.add_argument("--src", default=".", help="待分析仓库根目录")

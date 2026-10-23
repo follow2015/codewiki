@@ -9,9 +9,9 @@ description = "配置驱动、可离线交付的代码架构知识图谱与文�
 readme = "README.md"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
-# 运行时基线（设计文稿 9.1）：只维护一条 Python 基线，下限 3.14.7。
-# 本机开发可低于该版本直跑测试（源码布局，无需安装本包），但发布与 CI 以 3.14.7+ 为准。
-requires-python = ">=3.14.7"
+# 运行时基线：3.11（tomllib / datetime.UTC 是用到的最低特性，外部评审指出
+# 3.14.7 下限会挡住绝大多数用户）。CI 按 3.11–3.14 矩阵验证。
+requires-python = ">=3.11"
 dependencies = [
     "pydantic>=2.13,<3",
     "networkx>=3.7",
@@ -31,6 +31,11 @@ codewiki = "codewiki.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["codewiki*"]
+
+[tool.setuptools.package-data]
+# mermaid.min.js 随包分发（README 承诺）；不声明则正式 wheel 缺文件
+# （editable 安装能跑掩盖了这一点 —— 外部评审实测面）
+codewiki = ["assets/*.js"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

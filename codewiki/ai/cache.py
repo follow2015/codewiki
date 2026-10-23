@@ -39,7 +39,11 @@ def cache_key(
 
 
 class ResultCache:
-    """文件系统缓存（JSON 文件，一个键一个文件）。"""
+    """文件系统缓存（JSON 文件，一个键一个文件）。
+
+    缓存默认写在**被分析仓库**里（``.codewiki/ai-cache``）—— 目录创建时
+    自带 ``.gitignore``（内容 ``*``），不脏人家的工作树。
+    """
 
     def __init__(self, root: Path) -> None:
         self.dir = root / CACHE_DIRNAME
@@ -55,6 +59,9 @@ class ResultCache:
 
     def set(self, key: str, value: dict) -> None:
         self.dir.mkdir(parents=True, exist_ok=True)
+        gitignore = self.dir / ".gitignore"
+        if not gitignore.exists():
+            gitignore.write_text("*\n", encoding="utf-8")
         path = self.dir / f"{key}.json"
         tmp = path.with_suffix(".json.tmp")
         tmp.write_text(json.dumps(value, ensure_ascii=False), encoding="utf-8")

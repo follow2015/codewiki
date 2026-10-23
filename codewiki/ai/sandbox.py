@@ -20,6 +20,7 @@
 from __future__ import annotations
 
 import os
+import re
 import shlex
 import subprocess
 from dataclasses import dataclass, field
@@ -47,6 +48,85 @@ _GIT_FORCE_NO_DIFF_SUBCOMMANDS = frozenset({"diff", "log", "show"})
 
 DEFAULT_TIMEOUT_S = 10.0
 DEFAULT_MAX_OUTPUT = 64 * 1024
+
+
+@dataclass(frozen=True)
+class _OptionPolicy:
+    """一个命令的选项白名单。
+
+    ``plain``：无值长选项；``value``：带值长选项（值可为模式/文本，**不是路径**，
+    不参与 jail —— 如 ``-name`` 的 glob）；``short_plain`` / ``short_value``：
+    短旗标字母集合（``-rn`` 拆簇逐个验；``short_value`` 的字母后面可粘数字，
+    如 ``-A2`` / ``-U3``）；``viewer``：查看类命令（ls/cat/wc/head/tail/tree）
+    —— 其短旗标无论怎么簇都不可能写文件或外读，整簇放行，未知长选项仅当
+    带值且值过 jail 时才放行。
+    """
+
+    plain: frozenset[str] = frozenset()
+    value: frozenset[str] = frozenset()
+    short_plain: str = ""
+    short_value: str = ""
+    viewer: bool = False
+
+
+_GIT_PLAIN = frozenset(
+    {
+        "--patch", "--stat", "--shortstat", "--numstat", "--name-only", "--name-status",
+        "--oneline", "--no-color", "--color", "--no-ext-diff", "--no-textconv", "--full-index",
+        "--no-merges", "--first-parent", "--all", "--graph", "--reverse", "--ignore-all-space",
+        "--ignore-blank-lines", "--no-renames", "--cached", "--staged", "--exit-code", "--quiet",
+        "--follow", "--no-decorate", "--short", "--porcelain", "--others", "--full-name",
+        "--directory", "--error-unmatch", "--exclude-standard", "--line-number",
+        "--files-with-matches", "--no-pager", "--invert-match", "--fixed-strings",
+        "--extended-regexp", "--perl-regexp", "--ignore-case", "--word-regexp", "--summary",
+        "--check", "--text", "--no-commit-id", "--binary", "--break-rewrites",
+    }
+)
+_GIT_VALUE = frozenset(
+    {
+        "--abbrev", "--decorate", "--unified", "--pretty", "--format", "--date",
+        "--max-count", "--skip", "--since", "--until", "--author", "--committer",
+        "--grep", "--src-prefix", "--dst-prefix", "--diff-filter", "--max-depth",
+    }
+)
+_GIT_SHORT_PLAIN = "psnliwvEFhHabRg"
+_GIT_SHORT_VALUE = "Um"
+
+_GREP_PLAIN = frozenset({"--color", "--no-color", "--null", "--count", "--files-with-matches", "--line-number"})
+_GREP_VALUE = frozenset({"--include", "--exclude", "--exclude-dir", "--max-count", "--label"})
+_GREP_SHORT_PLAIN = "rnivwEFlchHoqsabPx"
+_GREP_SHORT_VALUE = "ABCme"
+
+_FIND_PLAIN = frozenset(
+    {"-print", "-print0", "-depth", "-L", "-P", "-H", "-not", "-a", "-o", "-empty", "-prune", "-xdev", "-quit"}
+)
+_FIND_VALUE = frozenset(
+    {
+        "-name", "-iname", "-lname", "-type", "-path", "-ipath", "-maxdepth", "-mindepth",
+        "-size", "-mtime", "-mmin", "-ctime", "-atime", "-newermt", "-perm", "-user", "-group",
+        "-links", "-samefile-name",
+    }
+)
+
+_VIEWER_PLAIN = frozenset(
+    {
+        "--color", "--no-color", "--noreport", "--no-report", "--dirsfirst", "--all",
+        "--almost-all", "--ignore-backups", "--escape", "--literal", "--quote-name",
+        "--reverse", "--recursive", "--human-readable", "--si", "--inode", "--identity",
+    }
+)
+
+_OPTION_POLICY: dict[str, _OptionPolicy] = {
+    "git": _OptionPolicy(_GIT_PLAIN, _GIT_VALUE, _GIT_SHORT_PLAIN, _GIT_SHORT_VALUE),
+    "grep": _OptionPolicy(_GREP_PLAIN, _GREP_VALUE, _GREP_SHORT_PLAIN, _GREP_SHORT_VALUE),
+    "find": _OptionPolicy(_FIND_PLAIN, _FIND_VALUE),
+    "ls": _OptionPolicy(viewer=True),
+    "cat": _OptionPolicy(viewer=True),
+    "wc": _OptionPolicy(viewer=True),
+    "head": _OptionPolicy(viewer=True),
+    "tail": _OptionPolicy(viewer=True),
+    "tree": _OptionPolicy(viewer=True),
+}
 
 
 class ShellDenied(Exception):
@@ -89,6 +169,70 @@ def _is_path_arg(arg: str) -> bool:
     return "/" in arg or "." in arg or arg in {"*"}
 
 
+def _jail_check(arg: str, *, root: Path) -> None:
+    """路径参数越界即拒绝（``realpath`` 展开 ``..`` 与符号链接）。"""
+    if not _is_path_arg(arg):
+        return
+    candidate = (Path(arg) if Path(arg).is_absolute() else root / arg).resolve()
+    if candidate != root and root not in candidate.parents:
+        raise ShellDenied(f"路径越出仓库根目录: {arg!r}")
+
+
+def _check_option(arg: str, policy: _OptionPolicy, *, root: Path, program: str) -> bool:
+    """校验一个选项；返回是否消耗下一个参数（带值选项的分离取值形式）。
+
+    长形式（含 find 的单杠风格 ``-name`` / ``-maxdepth``）先查 plain/value 表；
+    再按短旗标簇处理（``-rn`` 拆簇逐个验，``-A2`` 的粘数字是取值）。
+    """
+    if arg == "-" or re.fullmatch(r"-\d+", arg):
+        return False
+
+    name, eq, embedded = arg.partition("=")
+
+    if len(name) > 2 and name in (policy.plain | policy.value):
+        is_value_opt = name in policy.value
+        if is_value_opt:
+            return not eq
+        if eq:
+            _jail_check(embedded, root=root)
+        return False
+
+    if name.startswith("--"):
+        if policy.viewer:
+            if name in _VIEWER_PLAIN:
+                return False
+            if eq:
+                _jail_check(embedded, root=root)
+                return False
+            raise ShellDenied(f"{program} 长选项不在白名单: {arg!r}")
+        raise ShellDenied(
+            f"{program} 长选项不在白名单: {arg!r}（选项内嵌路径曾是越狱通道，一律走白名单）"
+        )
+
+    letters = arg[1:]
+    if policy.viewer:
+        return False
+    if not re.fullmatch(r"[A-Za-z0-9]+", letters):
+        raise ShellDenied(f"{program} 短旗标形状非法: {arg!r}")
+    consumes_next = False
+    i = 0
+    while i < len(letters):
+        ch = letters[i]
+        if ch in policy.short_plain:
+            i += 1
+            continue
+        if ch in policy.short_value:
+            j = i + 1
+            while j < len(letters) and letters[j].isdigit():
+                j += 1
+            if j == i + 1:
+                consumes_next = True
+            i = j
+            continue
+        raise ShellDenied(f"{program} 短旗标不在白名单: {arg!r}")
+    return consumes_next
+
+
 def check_command(command: str, *, repo_root: Path) -> list[str]:
     """静态校验：通过返回 argv，不通过抛 :class:`ShellDenied`。"""
     try:
@@ -102,13 +246,8 @@ def check_command(command: str, *, repo_root: Path) -> list[str]:
     if program not in ALLOWED_COMMANDS:
         raise ShellDenied(f"命令不在白名单: {program!r}（允许: {sorted(ALLOWED_COMMANDS)}）")
 
+    policy = _OPTION_POLICY[program]
     allowed_sub = ALLOWED_COMMANDS[program]
-    subcommand = next((a for a in argv[1:] if not a.startswith("-")), None)
-    if allowed_sub is not None:
-        if subcommand is None:
-            raise ShellDenied(f"{program} 缺少子命令（允许: {sorted(allowed_sub)}）")
-        if subcommand not in allowed_sub:
-            raise ShellDenied(f"{program} 子命令不在白名单: {subcommand!r}（允许: {sorted(allowed_sub)}）")
 
     if program == "find":
         for arg in argv[1:]:
@@ -123,8 +262,6 @@ def check_command(command: str, *, repo_root: Path) -> list[str]:
                 raise ShellDenied(
                     f"git 参数被禁止: {arg!r}（pager/diff driver/运行时配置可被仓库本地配置劫持为任意命令）"
                 )
-        if subcommand == "grep" and any(a == "-O" for a in argv[1:]):
-            raise ShellDenied("git grep -O 等价于 --open-files-in-pager（core.pager 劫持面），被禁止")
 
     for arg in argv:
         for token in _FORBIDDEN_TOKENS:
@@ -132,12 +269,29 @@ def check_command(command: str, *, repo_root: Path) -> list[str]:
                 raise ShellDenied(f"参数含危险元字符 {token!r}: {arg!r}（禁止管道/重定向/命令替换）")
 
     root = repo_root.resolve()
-    for arg in argv[1:]:
-        if not _is_path_arg(arg):
+    subcommand_seen = False
+    index = 1
+    while index < len(argv):
+        arg = argv[index]
+        index += 1
+        if not arg.startswith("-"):
+            if program == "git" and not subcommand_seen:
+                if arg not in (allowed_sub or set()):
+                    raise ShellDenied(f"{program} 子命令不在白名单: {arg!r}（允许: {sorted(allowed_sub or set())}）")
+                subcommand_seen = True
+                continue
+            _jail_check(arg, root=root)
             continue
-        candidate = (Path(arg) if Path(arg).is_absolute() else root / arg).resolve()
-        if candidate != root and root not in candidate.parents:
-            raise ShellDenied(f"路径越出仓库根目录: {arg!r}")
+        if program == "git" and not subcommand_seen:
+            raise ShellDenied(f"git 全局选项被禁止: {arg!r}（--git-dir/-C 可把 jail 换成任意目录）")
+        if _check_option(arg, policy, root=root, program=program):
+            if index < len(argv):
+                index += 1
+            else:
+                raise ShellDenied(f"{arg} 缺少取值")
+
+    if program == "git" and not subcommand_seen:
+        raise ShellDenied(f"git 缺少子命令（允许: {sorted(allowed_sub or set())}）")
     return argv
 
 
@@ -156,9 +310,10 @@ def execute_shell(
     argv = check_command(command, repo_root=repo_root)
     root = repo_root.resolve()
 
-    if argv[0] == "git":
-        if next((a for a in argv[1:] if not a.startswith("-")), None) in _GIT_FORCE_NO_DIFF_SUBCOMMANDS:
-            argv = [*argv, "--no-ext-diff", "--no-textconv"]
+    if argv[0] == "git" and next(
+        (a for a in argv[1:] if not a.startswith("-")), None
+    ) in _GIT_FORCE_NO_DIFF_SUBCOMMANDS:
+        argv = [*argv, "--no-ext-diff", "--no-textconv"]
 
     try:
         completed = subprocess.run(  # noqa: S603 - argv 已过白名单，且 shell=False

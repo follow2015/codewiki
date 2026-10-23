@@ -3,13 +3,15 @@
 五件套里 ``execute_shell`` 在 :mod:`codewiki.ai.sandbox`，``write_toml`` 在
 :mod:`codewiki.ai.annotate`（它受 write_back 策略控制，不是自由写文件）。
 
-两条贯穿始终的纪律：
+三条贯穿始终的纪律：
 
 1. **路径 jail**：``read_file`` 与 shell 共用同一把锁 —— 相对路径按 ``repo_root``
    解析，绝对路径与 ``..`` 都要归一化后判断是否仍在 root 内；
 2. **代码即不可信数据**：读出来的内容一律用 :func:`wrap_untrusted` 包裹，并过
    :func:`scan_prompt_injection`（§5.4 第 6 条）。忽略扫描结果等于把仓库内容
-   当成指令执行，这是本工具最主要的越权面。
+   当成指令执行，这是本工具最主要的越权面；
+3. **密钥不进模型**（外部评审 2026-10-23）：``read_file`` 能读到仓库里的
+   ``.env`` —— 内容发给模型前必须脱敏（脱敏不能只做在审计日志上）。
 """
 from __future__ import annotations
 
@@ -17,20 +19,29 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
+from codewiki.ai.audit import redact
 from codewiki.ai.sandbox import ShellDenied, execute_shell
 
 DEFAULT_MAX_CHARS = 24_000
 DEFAULT_MAX_HITS = 50
+MAX_PATTERN_CHARS = 500
 
 DELIM_BEGIN = "<<<CODEWIKI_UNTRUSTED_DATA>>>"
 DELIM_END = "<<<END_CODEWIKI_UNTRUSTED_DATA>>>"
 
+_DELIM_NEUTERED = "[CODEWIKI 数据分隔符已移除]"
+_DELIM_VARIANT = re.compile(r"(?i)<<<\s*(?:end_)?codewiki_untrusted_data\s*>>>")
+
 _INJECTION_PATTERNS = (
-    re.compile(r"(?i)ignore\s+(all\s+)?previous\s+instructions"),
+    re.compile(r"(?i)ignore\s+(all\s+)?(the\s+)?(previous|prior|above)"),
     re.compile(r"(?i)disregard\s+(all\s+)?(previous|prior)\s+instructions"),
     re.compile(r"(?i)you\s+are\s+now\s+"),
     re.compile(r"(?i)system\s*:\s*new\s+instructions"),
     re.compile(r"(?i)<\|im_start\|>|<\|endoftext\|>"),
+    re.compile(r"(?i)do\s+not\s+tell\s+the\s+user"),
+    re.compile(r"(?i)<<<\s*(?:end_)?codewiki_untrusted_data"),
+    re.compile(r"忽略.{0,6}(指令|规则|设定)"),
+    re.compile(r"(你现在是|你的新(角色|身份|任务))"),
 )
 
 
@@ -39,9 +50,15 @@ class ToolError(Exception):
 
 
 def wrap_untrusted(text: str, *, origin: str = "") -> str:
-    """把不可信内容包进固定分隔符，供 Prompt 引用。"""
+    """把不可信内容包进固定分隔符，供 Prompt 引用。
+
+    内容里若出现分隔符本身（任何大小写/空白变体），先**中性化**再包裹 ——
+    否则攻击者在文件里写一行 END 分隔符就能提前结束数据块，把后续内容
+    伪装成可信指令（外部评审实测面）。
+    """
     head = f"[来源: {origin}]\n" if origin else ""
-    return f"{head}{DELIM_BEGIN}\n{text}\n{DELIM_END}"
+    safe = _DELIM_VARIANT.sub(_DELIM_NEUTERED, text)
+    return f"{head}{DELIM_BEGIN}\n{safe}\n{DELIM_END}"
 
 
 def scan_prompt_injection(text: str) -> list[str]:
@@ -92,6 +109,8 @@ def read_file(
         lines = lines[max(0, start) : end]
         text = "\n".join(lines)
 
+    text = redact(text)
+
     if len(text) > max_chars:
         text = text[:max_chars] + f"\n…[已截断，共 {len(text)} 字符，上限 {max_chars}]"
     if audit:
@@ -105,33 +124,86 @@ def search_codebase(
     repo_root: Path,
     files: list[str] | None = None,
     max_hits: int = DEFAULT_MAX_HITS,
+    audit=None,
 ) -> list[dict]:
     """全库关键词 / 正则搜索（**纯 Python，不拼 shell**）。
 
     刻意不走 ``grep`` 沙箱：搜索是最频繁的工具，走子进程既慢又多一层攻击面，
     而且正则来自模型 —— 直接喂给 grep 等于让模型控制一个命令行工具。
+
+    模型正则的防线（外部评审 2026-10-23）：
+    - 模式长度上限 + **嵌套量词静态拒绝**（``(x+x+)+y`` 一类灾难性回溯模式
+      直接拒 —— 注意不能用线程超时：``re`` 匹配在 C 层持有 GIL 不释放，
+      主线程连 join 超时都醒不过来，实测整场测试挂死）；
+    - 单行截断后再匹配（回溯代价随输入长度指数增长，长行先砍）；
+    - ``files`` 参数逐个过路径 jail —— ``root / "/abs"`` 会整体替换 root，
+      绝对路径与 ``..`` 一律跳过，不当报错也不泄漏。
     """
+    if len(keyword) > MAX_PATTERN_CHARS:
+        raise ToolError(f"正则过长（{len(keyword)} > {MAX_PATTERN_CHARS} 字符），拒绝执行")
+    _reject_catastrophic_backtracking(keyword)
     try:
         pattern = re.compile(keyword)
     except re.error as exc:
         raise ToolError(f"非法正则: {exc}") from exc
 
     root = repo_root.resolve()
-    candidates = files if files is not None else _iter_text_files(root)
-    hits: list[dict] = []
-    for rel in candidates:
-        target = root / rel
-        try:
-            if not target.is_file():
+    if files is not None:
+        candidates = []
+        for rel in files:
+            try:
+                target = resolve_in_repo(str(rel), repo_root=root)
+            except ToolError:
                 continue
-            for lineno, line in enumerate(target.read_text(encoding="utf-8", errors="replace").splitlines(), start=1):
-                if pattern.search(line):
-                    hits.append({"path": rel, "line": lineno, "text": line.strip()[:200]})
-                    if len(hits) >= max_hits:
-                        return hits
+            candidates.append(target)
+    else:
+        candidates = [root / rel for rel in _iter_text_files(root)]
+
+    hits: list[dict] = []
+    for target in candidates:
+        try:
+            content = target.read_text(encoding="utf-8", errors="replace")
         except OSError:
             continue
+        for lineno, line in enumerate(content.splitlines(), start=1):
+            if pattern.search(line[:MAX_LINE_CHARS]):
+                hits.append({"path": str(target), "line": lineno, "text": line.strip()[:200]})
+                if len(hits) >= max_hits:
+                    if audit:
+                        audit.record(
+                            tool="search_codebase",
+                            args={"keyword": keyword[:120]},
+                            outcome="ok",
+                            detail=f"{len(hits)} hits",
+                        )
+                    return hits
+    if audit:
+        audit.record(
+            tool="search_codebase",
+            args={"keyword": keyword[:120]},
+            outcome="ok",
+            detail=f"{len(hits)} hits",
+        )
     return hits
+
+
+MAX_LINE_CHARS = 1000
+
+_NESTED_QUANTIFIER = re.compile(r"\([^()]*[*+{|][^()]*\)\s*[*+{?]")
+
+
+def _reject_catastrophic_backtracking(keyword: str) -> None:
+    """静态拒绝嵌套量词模式（``(x+)+`` / ``(.*)*`` / ``(a|aa)+`` 一族）。
+
+    这是保守检查：漏网的 exotic 形状换不成"挂死进程"（行长已截断、模式长度
+    有上限），误拦的模型可以换等价写法 —— fail-closed 的代价是可接受的。
+    """
+    compact = keyword.replace("?:", "")
+    if _NESTED_QUANTIFIER.search(compact):
+        raise ToolError(
+            "正则含嵌套量词（如 (x+)+），属灾难性回溯高危形状，拒绝执行；"
+            "请改写为无嵌套量词的等价模式"
+        )
 
 
 def _iter_text_files(root: Path) -> list[str]:
@@ -170,7 +242,17 @@ def query_graph(
     """查节点上下游（Agent 优先用它而不是瞎 grep，§5.1）。
 
     ``direction`` 取 ``upstream``（谁依赖我）/ ``downstream``（我依赖谁）/ ``both``。
+    ``depth`` 来自模型 —— 非数字必须在这里拒绝，不许把 ``int()`` 的异常漏成崩溃。
     """
+    try:
+        depth = int(depth)
+    except (TypeError, ValueError) as exc:
+        raise ToolError(f"depth 必须是整数: {depth!r}") from exc
+    if depth < 1:
+        depth = 1
+    elif depth > 10:
+        depth = 10
+
     nodes = {n.id: n.model_dump(mode="json") for n in packet.nodes}
     if node_id not in nodes:
         raise ToolError(f"节点不存在: {node_id}")

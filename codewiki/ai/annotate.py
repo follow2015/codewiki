@@ -121,15 +121,19 @@ def build_context(packet, cfg, *, src_root: Path | None) -> tuple[list[str], lis
     return layers, annotations
 
 
-def _read_for_prompt(path: str, *, src_root: Path | None) -> str:
-    """取证用的源码片段；取不到就返回空（Prompt 里会显式标注"未取证"）。"""
+def _read_for_prompt(path: str, *, src_root: Path | None) -> tuple[str, str]:
+    """取证用的源码片段；取不到就返回 ``( "", "" )``（Prompt 里会显式标注"未取证"）。
+
+    返回 ``(raw, wrapped)``：注入扫描必须做在 **raw** 上 —— wrapped 里带着我们
+    自己的合法分隔符，拿去扫描会把每个模块都误报成注入。
+    """
     if src_root is None:
-        return ""
+        return "", ""
     try:
         text = read_file(path, repo_root=src_root, max_chars=MAX_SOURCE_CHARS)
     except Exception:  # noqa: BLE001 - 取证失败不得中断：退化为"无源码"路径
-        return ""
-    return wrap_untrusted(text, origin=path)
+        return "", ""
+    return text, wrap_untrusted(text, origin=path)
 
 
 def _parse_suggestions(raw: str) -> tuple[list[Suggestion], list[str]]:
@@ -226,8 +230,8 @@ def annotate_modules(
             )
             break
 
-        snippet = _read_for_prompt(module["path"], src_root=src_root)
-        hits = scan_prompt_injection(snippet)
+        raw_source, snippet = _read_for_prompt(module["path"], src_root=src_root)
+        hits = scan_prompt_injection(raw_source)
         user_prompt = render_annotate_user(
             title=cfg.title,
             layers=layers,

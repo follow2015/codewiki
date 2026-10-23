@@ -1,12 +1,11 @@
 #!/usr/bin/env bash
-# 取 mermaid 运行时到 codewiki/assets/（离线交付前跑一次）。
+# 取/升级 mermaid 运行时到 codewiki/assets/mermaid.min.js。
 #
-# 为什么不把它提交进仓：3.5MB 的第三方构建产物，每次升级都会在 git 里再留一份
-# 全量副本；而它只影响"离线看图"这一项可选能力。仓库里保留**取它的脚本**，
-# 产物里保留**它本身**（analyze 时复制进 wiki-output/assets/）。
-#
-# 用法：
+# 该资产**已提交进仓**并随 wheel 分发（pyproject [tool.setuptools.package-data]
+# codewiki = ["assets/*.js"]）—— README 承诺"随包分发"，wheel 构建以源码树为准，
+# 不入库则克隆后构建的 wheel 必缺这个文件。本脚本只服务"升级版本"这一个场景：
 #   bash scripts/fetch-mermaid-asset.sh [版本]     # 默认 11
+# 升级后请连同新文件一起提交。
 set -euo pipefail
 
 VERSION="${1:-11}"

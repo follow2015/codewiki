@@ -17,6 +17,7 @@ import json
 import os
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
 
@@ -25,6 +26,43 @@ from codewiki.ai.audit import redact
 ENV_API_KEY = "OPENAI_API_KEY"
 ENV_BASE_URL = "OPENAI_BASE_URL"
 DEFAULT_BASE_URL = "https://api.openai.com/v1"
+
+
+def validate_base_url(base_url: str) -> str:
+    """base_url 必须是带 netloc 的 http/https URL（构造期 fail-closed）。
+
+    urllib 默认接受 ``file://`` 等协议 —— 被分析仓库是不可信输入，任何能控制
+    base_url 的一方都不得把请求（连同 Bearer 密钥）引去非 HTTP 端点。
+    """
+    parsed = urllib.parse.urlparse(base_url or "")
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        raise LLMError(
+            f"base_url 必须是 http/https URL: {base_url!r}（拒绝 file://、ftp:// 等协议）"
+        )
+    return base_url.rstrip("/")
+
+
+def resolve_base_url(
+    *,
+    cli_value: str | None,
+    config_value: str | None,
+    env: dict[str, str] | None = None,
+) -> tuple[str, str | None]:
+    """解析 base_url：**只认 CLI 与环境变量，被分析仓库的配置一律忽略**。
+
+    ``codewiki.toml`` 来自被分析仓库 —— hostile 仓库在配置里写自己的 base_url，
+    就能把环境变量里的 API Key 以 Bearer 头送走。返回 ``(base_url, warning)``；
+    配置里配了 base_url 时给出 warning（提示改用 CLI / 环境变量）。
+    """
+    environment = env if env is not None else os.environ
+    if cli_value:
+        return validate_base_url(cli_value), None
+    if config_value:
+        return validate_base_url(environment.get(ENV_BASE_URL) or DEFAULT_BASE_URL), (
+            f"忽略 codewiki.toml [ai] base_url（被分析仓库的配置是不可信输入，"
+            f"曾可借此把 API Key 发往任意服务器）：请改用 --base-url 或环境变量 {ENV_BASE_URL}"
+        )
+    return validate_base_url(environment.get(ENV_BASE_URL) or DEFAULT_BASE_URL), None
 
 
 class LLMError(Exception):
@@ -79,7 +117,7 @@ class OpenAICompatClient:
         backoff_base_s: float = 1.0,
         transport=None,
     ) -> None:
-        self.base_url = (base_url or os.environ.get(ENV_BASE_URL) or DEFAULT_BASE_URL).rstrip("/")
+        self.base_url = validate_base_url(base_url or os.environ.get(ENV_BASE_URL) or DEFAULT_BASE_URL)
         self.api_key = api_key or os.environ.get(ENV_API_KEY) or ""
         self.model = model
         self.timeout_s = timeout_s
@@ -109,7 +147,7 @@ class OpenAICompatClient:
     def _post(self, payload: dict) -> dict:
         if self._transport is not None:
             return self._transport(payload)
-        request = urllib.request.Request(  # noqa: S310 - 仅 https/http，base_url 由配置给定
+        request = urllib.request.Request(  # noqa: S310 - validate_base_url 已钉死 http/https
             f"{self.base_url}/chat/completions",
             data=json.dumps(payload).encode("utf-8"),
             headers={
@@ -176,4 +214,6 @@ __all__ = [
     "LLMUnavailable",
     "OpenAICompatClient",
     "probe_connectivity",
+    "resolve_base_url",
+    "validate_base_url",
 ]

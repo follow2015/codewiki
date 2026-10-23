@@ -55,9 +55,9 @@ def layer_color(name: str) -> str:
 def _layer_buckets(packet: DataPacket):
     """按层归组节点；返回 ``(有序层带, 层名表)``，未分层兜底在最后。"""
     ordered = sorted(
-        packet.layers, key=lambda l: (l.order if l.order is not None else 10_000, l.id)
+        packet.layers, key=lambda item: (item.order if item.order is not None else 10_000, item.id)
     )
-    names: dict[str, str] = {l.id: l.name for l in packet.layers}
+    names: dict[str, str] = {item.id: item.name for item in packet.layers}
     bands: list[tuple[str, str, list]] = []
     remaining = list(packet.nodes)
     for layer in ordered:
@@ -160,7 +160,6 @@ def render_layer_map_svg(packet: DataPacket, *, max_flows: int = 10) -> str:
 
     band_tops = []
     y = 8.0
-    flow_counts = {k: v for k, v in flows}
     all_counts: dict[tuple[str, str], int] = {}
     node_layer = {n.id: n.layer_id for n in packet.nodes}
     for edge in packet.edges:

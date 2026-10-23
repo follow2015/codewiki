@@ -17,9 +17,9 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-_EXTRA_FORBID = ConfigDict(extra="forbid")
-
 from codewiki.layering import layer_of
+
+_EXTRA_FORBID = ConfigDict(extra="forbid")
 
 CONFIG_FILENAME = "codewiki.toml"
 SCHEMA_EXPORT_NAME = "codewiki.schema.json"

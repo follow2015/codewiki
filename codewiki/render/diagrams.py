@@ -201,10 +201,7 @@ def _slug(path: str) -> str:
     :func:`build_slug_map` 统一消歧。
     """
     name = path.rsplit("/", 1)[-1]
-    if "." in name and name.rsplit(".", 1)[0]:
-        stem = path.rsplit(".", 1)[0]
-    else:
-        stem = path
+    stem = path.rsplit(".", 1)[0] if "." in name and name.rsplit(".", 1)[0] else path
     slug = stem.replace("/", "_").replace("-", "_")
     if not slug:
         slug = "_" + path.replace("/", "_").replace("-", "_")
