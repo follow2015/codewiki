@@ -25,9 +25,17 @@ jobs:
         # `Requires-Python >=3.12,!=3.14.1`，钉死 3.14.1 就会踩上那个坑。
         python-version: ["3.11", "3.14"]
     steps:
-      - uses: actions/checkout@v4
+      # ⚠️ action 的 Node 版本由它自己 runs.using 声明，**不是**我们能配的 ——
+      # 项目里没有 Node，也没有 setup-node 的用武之地。declares node20 的 action
+      # 会被运行器"强制在 node24 上跑"（当前状态），弃用期结束后直接不能跑。
+      # 所以唯一的修法是把 action 升到声明 node24 的版本：
+      #   checkout       v4 = node20 → v5/v6/v7 = node24
+      #   setup-python   v5 = node20 → v6/v7    = node24
+      # node24 要求运行器 ≥ v2.328.0（GitHub-hosted 现为 2.338.0）。
+      # 取最新大版本而非"刚好消警告"的 v5/v6：那两个也会立刻变成同一条债。
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python-version }}
 
