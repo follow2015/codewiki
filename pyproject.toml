@@ -10,11 +10,17 @@ readme = "README.md"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
 # 运行时基线：3.11（tomllib / datetime.UTC 是用到的最低特性，外部评审指出
-# 3.14.7 下限会挡住绝大多数用户）。CI 按 3.11–3.14 矩阵验证。
+# 3.14.7 下限会挡住绝大多数用户）。CI 按 3.11 / 3.14 两端验证（见 ci.yml）。
 requires-python = ">=3.11"
 dependencies = [
     "pydantic>=2.13,<3",
-    "networkx>=3.7",
+    # 下限写 3.6 而不是 3.7：**networkx 3.7 的 Requires-Python 是 >=3.12**，而本包
+    # 声明支持 3.11。写 >=3.7 会让 3.11 上永远无解（pip 报 No matching
+    # distribution，而不是"装个旧版"）——声明与依赖互相矛盾，CI 的 3.11 腿必然红。
+    # 本项目只用 strongly_connected_components / simple_cycles /
+    # single_source_shortest_path_length / community，3.6 全都有。
+    # pip 会按解释器自己选：3.11 装 3.6，3.12+ 装 3.7。
+    "networkx>=3.6",
 ]
 
 [project.optional-dependencies]
