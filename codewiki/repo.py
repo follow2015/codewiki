@@ -8,9 +8,10 @@
 """
 from __future__ import annotations
 
-import subprocess
 from dataclasses import dataclass
 from pathlib import Path
+
+from codewiki.subproc import run
 
 DEFAULT_EXCLUDES: tuple[str, ...] = (
     ".codewiki",
@@ -91,15 +92,8 @@ def iter_source_files(
 def repo_commit(root: Path) -> str | None:
     """尽力取 HEAD 提交号（取不到返回 None，不阻断）。"""
     try:
-        out = subprocess.run(
-            ["git", "rev-parse", "HEAD"],
-            cwd=root,
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-        return out.stdout.strip() or None
-    except Exception:
+        return run(["git", "rev-parse", "HEAD"], cwd=root, timeout=5).stdout.strip() or None
+    except Exception:  # noqa: BLE001 - 取不到提交号只是少一条元信息，不该中断分析
         return None
 
 

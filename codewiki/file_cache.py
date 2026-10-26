@@ -48,16 +48,23 @@ class FileModelCache:
         self.enabled = True
 
     @staticmethod
-    def key(path: str, mtime_ns: int, content_hash: str, backend: str) -> str:
-        """缓存键：**必须含后端**。
+    def key(path: str, mtime_ns: int, content_hash: str, backend: str, *, parser_version: int) -> str:
+        """缓存键：**必须含后端与解析结果格式版本**。
 
         同一份文件用不同后端解析出的 FileModel 不是一回事（ast 能拿到调用与
         继承，regex 只有 import 骨架）。键里没有 backend 时，一轮 `--backend ast`
         之后再来一轮 `--backend regex`，会全部命中 ast 的缓存 —— 用户点名要 regex，
-        拿到的却是 ast 的事实，且 provenance 也跟着说谎。做成必需参数，避免
-        以后新增调用点悄悄漏掉。
+        拿到的却是 ast 的事实，且 provenance 也跟着说谎。
+
+        ``parser_version`` 解决的是另一半：**后端没换、解析逻辑变了**。修一个
+        嵌套类限定名、改一处 import 归属，输出就变了，而路径/mtime/内容 hash 一模
+        一样 —— 缓存照样命中，拿到旧格式的 FileModel，症状是"改了代码但产物没变"。
+        后端改了解析行为就要 +1（见 ``analyzers.base.FORMAT_VERSIONS``）。
+
+        两个参数都做成必需（``parser_version`` 还是 keyword-only）：新增调用点
+        漏传会当场 TypeError，而不是悄悄退化成"没有版本维度的键"。
         """
-        payload = f"{backend}|{path}|{mtime_ns}|{content_hash}"
+        payload = f"{backend}|{parser_version}|{path}|{mtime_ns}|{content_hash}"
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
     def _path_of(self, key: str) -> Path:

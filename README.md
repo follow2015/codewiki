@@ -76,7 +76,9 @@ wiki-output/
 ## AI 层（可选）
 
 ```bash
-export OPENAI_API_KEY=...   # 支持 OpenAI 兼容端点（本地 Ollama / vLLM 亦可）
+export OPENAI_API_KEY=...
+export OPENAI_MODEL=qwen2.5-coder        # 也可用 --model
+export OPENAI_BASE_URL=http://localhost:11434/v1   # 也可用 --base-url（本地 Ollama / vLLM）
 
 # ① 无网开发机：出静态产物
 codewiki analyze --src . --out wiki-output
@@ -87,6 +89,11 @@ codewiki ai-annotate --input wiki-output/data/codewiki.json --config codewiki.to
 # ③ 回开发机：diff 审阅后合并，重新 analyze 生效
 codewiki merge-annotations /tmp/ai/suggestions/annotations.suggest.toml
 ```
+
+`codewiki.toml` 来自被分析仓库，因此 `[ai]` 里的 **`model` / `base_url` / `write_back`
+只认命令行与环境变量**（写在文件里会被忽略并提示原因）——否则 hostile 仓库可以把
+API Key 发往任意地址，或让 AI 建议直接合进主配置。自己拥有的仓库要保留文件写法时，
+加 `--trust-config`（或 `CODEWIKI_TRUST_CONFIG=1`）显式授权。
 
 三条硬约束：AI **不改写静态产物**、**不直写主配置**（合并且由人发起）、
 **受保护注解（human/reviewed）连 `--force` 也不动**；取证行号不可验证的建议
@@ -101,9 +108,10 @@ codewiki merge-annotations /tmp/ai/suggestions/annotations.suggest.toml
 | 增量（改 2% = 200 文件） | 10,000 | **5.0s** | 636MB |
 | 首次全量 | 5,000 | 11.5s | — |
 
-增量靠两层：FileModel 缓存（键 = 路径 + mtime + 内容 hash）+
-**增量渲染**（只重渲"改动 ∪ 影响闭包"内的模块页与图）。分层或注解有变化时
-自动退回全量，并把原因写进诊断。
+增量靠两层：FileModel 缓存（键 = 后端 + 解析格式版本 + 路径 + mtime + 内容 hash）+
+**增量渲染**（只重渲"改动 ∪ 影响闭包"内的模块页与图）。渲染输入指纹（分层、注解、
+`min_confidence`、`max_nodes`、语言白名单、工具/格式版本）任一项变化即自动退回全量，
+诊断里点名是哪一项变了；上一轮没跑完会留 `.incomplete` 标记，下一轮据此全量重渲。
 
 ## 关于本仓
 

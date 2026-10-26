@@ -44,17 +44,23 @@ note = "下单主链路；并发限制见 run_order 的 Redis 锁。"
 [ai]
 # 整段缺失等同 enabled = false（纯静态模式，analyze 全功能可用）
 enabled = false
-# OpenAI 兼容端点：可指向本地 Ollama / vLLM 或企业内网网关
-base_url = "http://localhost:11434/v1"
-model = "qwen2.5-coder"
+# ── 下面三项「只认操作者」──────────────────────────────────────────────────
+# 本文件通常就躺在**被分析仓库**里，作者可控。若允许它决定端点和写入策略，
+# hostile 仓库就能把 OPENAI_API_KEY 发往任意地址，或让 AI 建议直接合进主配置。
+# 所以这三项写在文件里默认被忽略（运行时打一条 warning），请改用命令行/环境变量：
+#   model      → --model       或 OPENAI_MODEL
+#   base_url   → --base-url    或 OPENAI_BASE_URL
+#   write_back → --write-back  （review-file / dry-run / confirm / auto）
+# 自己拥有的仓库想保留文件写法：加 --trust-config，或置 CODEWIKI_TRUST_CONFIG=1。
+# model = "qwen2.5-coder"
+# base_url = "http://localhost:11434/v1"
+# write_back = "review-file"
 # 单轮 token 硬上限；超预算优雅停止并标注"未完成模块"
 budget_tokens = 200000
 max_retries = 2
 timeout_s = 60
 # 标注取前 N 个热点模块
 top_n = 30
-# 产出策略：review-file（默认，写建议文件）/ dry-run / confirm / auto
-write_back = "review-file"
 # 拓扑感知缓存键（可选优化项，默认关闭）
 cache_include_topology = false
 # L2 真实渲染校验（需 Node 24 LTS + mermaid-cli ≥12）

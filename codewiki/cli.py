@@ -10,13 +10,14 @@ import json
 import sys
 from pathlib import Path
 
-from codewiki import __version__
+from codewiki import __version__, clock
 from codewiki.ai.agent import AgentLoop
 from codewiki.ai.annotate import annotate_modules, write_suggestions
 from codewiki.ai.audit import AUDIT_FILENAME, AuditLog
-from codewiki.ai.client import OpenAICompatClient, resolve_base_url
+from codewiki.ai.client import OpenAICompatClient, resolve_base_url, resolve_model
 from codewiki.ai.merge import merge_annotations, render_merge_report
-from codewiki.analyzers import REGISTRY, register_defaults
+from codewiki.analyzers import REGISTRY, format_version_of, register_defaults
+from codewiki.clock import ClockError
 from codewiki.config import CONFIG_FILENAME, ConfigError, load_config
 from codewiki.doctor import render_report, run_checks
 from codewiki.file_cache import CacheStats, FileModelCache, content_hash_of, mtime_ns_of
@@ -37,6 +38,15 @@ from codewiki.graph.suggest_layers import (
     suggest_layers,
 )
 from codewiki.models import FileModel
+from codewiki.packetio import PacketError, load_packet, load_packet_or_none
+from codewiki.pipeline.incremental import (
+    INCOMPLETE_MARKER,
+    changed_components,
+    clear_incomplete_marker,
+    has_incomplete_marker,
+    render_inputs,
+    write_incomplete_marker,
+)
 from codewiki.render.diagrams import render_all
 from codewiki.render.jsonio import packet_from_parts, write_packet
 from codewiki.render.mermaid_cycle import render_all_cycles
@@ -53,6 +63,25 @@ from codewiki.render.site import (
 from codewiki.render.wiki import INDEX_FILENAME, MODULES_SUBDIR, render_index, render_module_page
 from codewiki.repo import iter_source_files, repo_commit
 from codewiki.schemas import DataPacket, Diagnostic
+from codewiki.trust import apply_trust_policy, is_trusted
+
+
+def _load_trusted_config(path: Path, *, trusted: bool):
+    """读配置并施加信任策略（唯一入口：三个 AI 命令都走这里）。
+
+    ``codewiki.toml`` 来自被分析仓库，所以 ``base_url`` / ``model`` /
+    ``write_back`` 这类"只该由操作者决定"的字段要打回默认值 —— 具体规则在
+    :mod:`codewiki.trust`，这里只负责把给用户的 warning 打到 stderr。
+    """
+    report = apply_trust_policy(load_config(path), trusted=trusted)
+    for warning in report.warnings:
+        print(f"warning: {warning}", file=sys.stderr)
+    return report.config
+
+
+def _trusted(args: argparse.Namespace) -> bool:
+    """``--trust-config`` 或 ``CODEWIKI_TRUST_CONFIG=1`` 才算"我信任这份配置"。"""
+    return bool(getattr(args, "trust_config", False)) or is_trusted()
 
 
 def _backend_of(analyzer) -> str:  # noqa: ANN001
@@ -72,9 +101,15 @@ def _analyze(args: argparse.Namespace) -> int:
         print(f"error: --src 不是目录: {root}", file=sys.stderr)
         return 2
 
+    try:
+        generated_at = clock.resolve(getattr(args, "timestamp", None))
+    except ClockError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+
     config_path = Path(args.config) if args.config else root / CONFIG_FILENAME
     try:
-        cfg = load_config(config_path)
+        cfg = _load_trusted_config(config_path, trusted=_trusted(args))
     except ConfigError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
@@ -101,6 +136,7 @@ def _analyze(args: argparse.Namespace) -> int:
                 mtime_ns_of(root / source.path),
                 content_hash_of(source.content),
                 _backend_of(analyzer),
+                parser_version=format_version_of(_backend_of(analyzer)),
             )
             if cache
             else None
@@ -126,11 +162,12 @@ def _analyze(args: argparse.Namespace) -> int:
         {"id": layer.id, "name": layer.name, "paths": layer.paths}
         for layer in cfg.architecture.layers
     ]
+    min_confidence = (
+        args.min_confidence if args.min_confidence is not None else cfg.analysis.min_confidence
+    )
     result = build_graph(
         models,
-        min_confidence=args.min_confidence
-        if args.min_confidence is not None
-        else cfg.analysis.min_confidence,
+        min_confidence=min_confidence,
         layers=layers_cfg,
         root_package=root.name,
     )
@@ -168,22 +205,12 @@ def _analyze(args: argparse.Namespace) -> int:
 
     if stats.total:
         if cache is not None:
-            diagnostics.append(
-                Diagnostic(
-                    level="info",
-                    code="CACHE_STATS",
-                    message=f"FileModel 缓存：命中 {stats.hit} / 重新解析 {stats.miss} / 解析失败 {stats.failed}"
-                    + ("" if cache.enabled else "（缓存目录不可写，已降级为无缓存）"),
-                )
+            print(
+                f"FileModel 缓存：命中 {stats.hit} / 重新解析 {stats.miss} / 解析失败 {stats.failed}"
+                + ("" if cache.enabled else "（缓存目录不可写，已降级为无缓存）")
             )
         else:
-            diagnostics.append(
-                Diagnostic(
-                    level="info",
-                    code="CACHE_STATS",
-                    message=f"解析统计（--no-cache）：解析 {stats.miss} / 失败 {stats.failed}",
-                )
-            )
+            print(f"解析统计（--no-cache）：解析 {stats.miss} / 失败 {stats.failed}")
 
     packet = packet_from_parts(
         title=cfg.title if cfg.project.name else root.name,
@@ -195,6 +222,7 @@ def _analyze(args: argparse.Namespace) -> int:
         provenance=_collect_provenance(models),
         repo_root=str(root),
         repo_commit=repo_commit(root),
+        generated_at=generated_at,
     )
     god = god_node_diagnostics(
         packet,
@@ -206,19 +234,31 @@ def _analyze(args: argparse.Namespace) -> int:
 
     previous_snapshot = _read_previous_snapshot(out_dir) if args.incremental else None
 
+    inputs = render_inputs(
+        cfg=cfg,
+        packet=packet,
+        min_confidence=min_confidence,
+        backends=_collect_provenance(models),
+    )
+    packet.meta.render_inputs = inputs
+
     only_modules, incremental_note = _incremental_scope(
-        packet, cfg, enabled=args.incremental, previous=previous_snapshot
+        packet,
+        enabled=args.incremental,
+        previous=previous_snapshot,
+        inputs=inputs,
+        interrupted=has_incomplete_marker(out_dir),
     )
     if incremental_note:
-        packet.diagnostics.append(incremental_note)
-        diagnostics.append(incremental_note)
+        print(incremental_note)
 
+    write_incomplete_marker(out_dir)
     packet_path = write_packet(packet, out_dir)
 
     diagrams = render_all(
         packet,
         out_dir,
-        min_confidence=cfg.analysis.min_confidence,
+        min_confidence=min_confidence,
         max_nodes=cfg.analysis.max_nodes,
         only_modules=only_modules,
     )
@@ -240,6 +280,8 @@ def _analyze(args: argparse.Namespace) -> int:
     (out_dir / INDEX_HTML).write_text(render_index_html(packet), encoding="utf-8")
     write_module_html(out_dir)
 
+    clear_incomplete_marker(out_dir)
+
     print(
         f"分析完成：{len(models)} 个文件 / {len(result.nodes)} 节点 / {len(result.edges)} 边 / "
         f"{len(diagrams.files)} 张图"
@@ -252,61 +294,60 @@ def _analyze(args: argparse.Namespace) -> int:
     return 0
 
 
-def _incremental_scope(packet, cfg, *, enabled: bool, previous: DataPacket | None):
-    """算出本轮需要重渲的模块集合；返回 ``(集合|None, 诊断|None)``。
+def _incremental_scope(
+    packet,
+    *,
+    enabled: bool,
+    previous: DataPacket | None,
+    inputs: dict[str, str],
+    interrupted: bool,
+):
+    """算出本轮需要重渲的模块集合；返回 ``(集合|None, 说明|None)``。
 
-    ``None`` 表示"不做增量"（全量渲染）。判据写清为什么不做 —— 否则"开了增量
-    却没生效"会变成又一个静默问题。
+    ``None`` 表示"不做增量"（全量渲染）。每个"不做"的理由都要说出来 —— 否则
+    "开了增量却没生效"会变成又一个静默问题；理由还必须**点名是哪一项变了**，
+    只说"输入变了"等于让用户去猜。
+
+    说明**进 stdout，不进数据包**：数据包是归档物，描述的是"仓库长什么样"，
+    不描述"这一轮是怎么跑的"。把它写进 packet.diagnostics 会让"同一份输入的
+    增量产物"永远比全量产物多一条诊断 —— 逐字节比对这条验收就废了（`CACHE_STATS`
+    踩过同一个坑）。
+
+    判据本身（分量表 / 比较 / 标记）在 :mod:`codewiki.pipeline.incremental`，
+    这里只做编排：读上一轮、给出结论。
     """
     if not enabled:
         return None, None
 
-    if previous is None:
-        return None, Diagnostic(
-            level="info",
-            code="INCREMENTAL_SKIPPED",
-            message="增量已开启但无上一轮快照（首次运行）⇒ 本轮全量渲染",
+    if interrupted:
+        return None, (
+            f"上一轮渲染未完成（{INCOMPLETE_MARKER} 仍在产物目录）⇒ 本轮全量重渲，"
+            "不复用可能残缺的页面"
         )
 
-    if _config_fingerprint(previous) != _config_fingerprint(packet, cfg=cfg):
-        return None, Diagnostic(
-            level="info",
-            code="INCREMENTAL_SKIPPED",
-            message="分层或注解相对上一轮有变化（每个模块页都带层名与注解）⇒ 本轮全量渲染",
-        )
+    if previous is None:
+        return None, "增量已开启但无上一轮快照（首次运行）⇒ 本轮全量渲染"
+
+    if not previous.meta.render_inputs:
+        return None, "上一轮快照没有渲染指纹（旧版本产物）⇒ 本轮全量渲染，本轮起可增量"
+
+    changed = changed_components(previous.meta.render_inputs, inputs)
+    if changed:
+        return None, f"渲染输入相对上一轮有变化（{'、'.join(changed)}）⇒ 本轮全量渲染"
 
     impact = diff_packets(previous, packet)
     scope = set(impact.changed) | set(impact.added) | set(impact.direct) | set(impact.indirect)
     reused = sum(1 for n in packet.nodes if n.type.value == "Module" and n.id not in scope)
-    return scope, Diagnostic(
-        level="info",
-        code="INCREMENTAL_SCOPE",
-        message=f"增量渲染：重渲 {len(scope)} 个模块 / 复用 {reused} 个（改动 {len(impact.changed)}）",
-    )
+    return scope, f"增量渲染：重渲 {len(scope)} 个模块 / 复用 {reused} 个（改动 {len(impact.changed)}）"
 
 
 def _read_previous_snapshot(out_dir: Path):
-    """读上一轮产物（供增量比较）；不存在或损坏返回 ``None``（⇒ 本轮全量）。"""
-    snapshot = out_dir / "data" / "codewiki.json"
-    if not snapshot.is_file():
-        return None
-    try:
-        return DataPacket.model_validate_json(snapshot.read_text(encoding="utf-8"))
-    except Exception:  # noqa: BLE001 - 上一轮产物坏了就全量，不猜
-        return None
+    """读上一轮产物（供增量比较）；不存在 / 损坏 / 版本不兼容都返回 ``None``。
 
-
-def _config_fingerprint(packet, *, cfg=None) -> str:
-    """分层与注解的指纹（用于判断"配置变了就该全量重渲"）。"""
-    import hashlib
-
-    layers = [(layer.id, layer.name) for layer in packet.layers]
-    notes = [(a.target, a.label, a.note, a.source, a.reviewed) for a in packet.annotations]
-    if cfg is not None:
-        layers = [(layer["id"], layer["name"]) for layer in cfg.layers_as_nodes()]
-        notes = [(a.target, a.label, a.note, a.source, a.reviewed) for a in cfg.annotations]
-    payload = repr(sorted(layers)) + "|" + repr(sorted(notes))
-    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
+    "读不了就当没有" 在这里是**正确**选择：增量复用旧页面要求确实理解上一轮，
+    读不懂就全量重渲（宁可多渲，不可拿旧结论当新结论）。
+    """
+    return load_packet_or_none(out_dir / "data" / "codewiki.json")
 
 
 def _write_wiki(packet, out_dir: Path, *, diagrams_dir: Path, only_modules: set[str] | None = None) -> None:
@@ -413,14 +454,15 @@ def _ai_annotate_cmd(args: argparse.Namespace) -> int:
 
     config_path = Path(args.config).resolve() if args.config else Path.cwd() / CONFIG_FILENAME
     try:
-        cfg = load_config(config_path)
+        cfg = _load_trusted_config(config_path, trusted=_trusted(args))
     except ConfigError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
-    model = args.model or cfg.ai.model
+    model = resolve_model(cli_value=args.model, config_value=cfg.ai.model)
     if not model:
         print(
-            "error: 未指定模型 —— 在 codewiki.toml 里配 [ai] model，或用 --model 指定",
+            "error: 未指定模型 —— 用 --model 或环境变量 OPENAI_MODEL 指定"
+            "（codewiki.toml 里的 [ai] model 默认被忽略：该文件来自被分析仓库）",
             file=sys.stderr,
         )
         return 2
@@ -431,9 +473,9 @@ def _ai_annotate_cmd(args: argparse.Namespace) -> int:
         return 2
 
     try:
-        packet = DataPacket.model_validate_json(input_path.read_text(encoding="utf-8"))
-    except Exception as exc:  # noqa: BLE001 - 数据包损坏属用户输入错误，给 2 不是 500
-        print(f"error: 数据包无法解析: {exc}", file=sys.stderr)
+        packet = load_packet(input_path)
+    except PacketError as exc:
+        print(f"error: {exc}", file=sys.stderr)
         return 2
 
     out_dir = Path(args.out).resolve() if args.out else input_path.parent.parent
@@ -522,7 +564,7 @@ def _merge_annotations_cmd(args: argparse.Namespace) -> int:
 
 
 def _load_packet(path: Path) -> DataPacket | None:
-    """读数据包（统一入口）；不存在或损坏返回 ``None`` 并由调用方给退出码 2。
+    """读数据包（统一入口；不存在 / 损坏 / 版本不兼容返回 ``None`` 并由调用方给 2）。
 
     刻意不抛 :class:`SystemExit`：带字符串的 SystemExit 退出码是 1，与"运行失败"
     混在一起，而"输入文件不存在"是**用法错误**（应给 2）。
@@ -531,9 +573,9 @@ def _load_packet(path: Path) -> DataPacket | None:
         print(f"error: 数据包不存在: {path}（先跑 analyze）", file=sys.stderr)
         return None
     try:
-        return DataPacket.model_validate_json(path.read_text(encoding="utf-8"))
-    except Exception as exc:  # noqa: BLE001 - 坏数据包属用户输入错误
-        print(f"error: 数据包无法解析: {exc}", file=sys.stderr)
+        return load_packet(path)
+    except PacketError as exc:
+        print(f"error: {exc}", file=sys.stderr)
         return None
 
 
@@ -678,14 +720,16 @@ def _agent_cmd(args: argparse.Namespace) -> int:
     if packet is None:
         return 2
     try:
-        model = args.model or load_config(
-            Path(args.config).resolve() if args.config else Path.cwd() / CONFIG_FILENAME
-        ).ai.model
+        cfg = _load_trusted_config(
+            Path(args.config).resolve() if args.config else Path.cwd() / CONFIG_FILENAME,
+            trusted=_trusted(args),
+        )
     except ConfigError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
+    model = resolve_model(cli_value=args.model, config_value=cfg.ai.model)
     if not model:
-        print("error: 未指定模型（[ai] model 或 --model）", file=sys.stderr)
+        print("error: 未指定模型（--model 或环境变量 OPENAI_MODEL）", file=sys.stderr)
         return 2
 
     question = args.question or _read_question_from_stdin()
@@ -785,6 +829,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--config", help=f"配置路径（默认 <src>/{CONFIG_FILENAME}）"
     )
     analyze.add_argument(
+        "--trust-config",
+        action="store_true",
+        help="信任配置里的 [ai] base_url/model/write_back（默认忽略：该文件来自被分析仓库）",
+    )
+    analyze.add_argument(
         "--offline-asset", help="离线看图用的 mermaid.min.js（默认取包内自带的那份）"
     )
     analyze.add_argument("--no-cache", action="store_true", help="跳过 FileModel 增量缓存（强制全量解析）")
@@ -800,6 +849,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="覆盖配置里的 analysis.min_confidence",
     )
     analyze.add_argument("--strict", action="store_true", help="存在 error 级诊断时以非 0 退出")
+    analyze.add_argument(
+        "--timestamp",
+        help="固定 generated_at（ISO-8601 或整数秒）；也可用环境变量 SOURCE_DATE_EPOCH"
+        " —— 两者都是为了让产物可复现、可逐字节比对",
+    )
     analyze.set_defaults(func=_analyze)
 
     export = sub.add_parser("export", help="把产物目录打成单个 Zip（原子化）")
@@ -818,9 +872,14 @@ def build_parser() -> argparse.ArgumentParser:
     annotate.add_argument("--src", help="源码根目录（只读取证；不给则仅依据数据包事实）")
     annotate.add_argument("--out", help="建议输出目录（默认数据包所在产物根目录）")
     annotate.add_argument("--cache-dir", help="AI 缓存根目录（默认 --src 或当前目录）")
-    annotate.add_argument("--model", help="覆盖配置里的 [ai] model")
+    annotate.add_argument("--model", help="模型名（优先于 OPENAI_MODEL 与配置）")
     annotate.add_argument("--base-url", help="覆盖 [ai] base_url（本地 Ollama / vLLM 内网网关）")
     annotate.add_argument("--write-back", choices=sorted(_WRITE_BACK_POLICIES), help="产出策略（默认 review-file）")
+    annotate.add_argument(
+        "--trust-config",
+        action="store_true",
+        help="信任配置里的 [ai] base_url/model/write_back（默认忽略：该文件来自被分析仓库）",
+    )
     annotate.add_argument("--top-n", type=int, help="标注前 N 个热点模块")
     annotate.add_argument("--budget", type=int, help="单轮 token 硬上限")
     annotate.set_defaults(func=_ai_annotate_cmd)
@@ -872,8 +931,13 @@ def build_parser() -> argparse.ArgumentParser:
     agent_cmd.add_argument("--input", default="wiki-output/data/codewiki.json")
     agent_cmd.add_argument("--src", help="源码根目录（用于 read_file / search / shell）")
     agent_cmd.add_argument("--config", help=f"配置路径（默认 ./{CONFIG_FILENAME}）")
-    agent_cmd.add_argument("--model", help="覆盖 [ai] model")
+    agent_cmd.add_argument("--model", help="模型名（优先于 OPENAI_MODEL 与配置）")
     agent_cmd.add_argument("--base-url", help="覆盖 [ai] base_url")
+    agent_cmd.add_argument(
+        "--trust-config",
+        action="store_true",
+        help="信任配置里的 [ai] base_url/model/write_back（默认忽略：该文件来自被分析仓库）",
+    )
     agent_cmd.add_argument("--max-rounds", type=int, default=10, help="最大取证轮次（防无限循环）")
     agent_cmd.add_argument("--out", help="审计日志目录（默认与数据包同级的产物根目录）")
     agent_cmd.set_defaults(func=_agent_cmd)

@@ -17,9 +17,10 @@
 from __future__ import annotations
 
 import shutil
-import subprocess
 import sys
 from dataclasses import dataclass
+
+from codewiki.subproc import run
 
 MIN_PYTHON = (3, 14, 7)
 NODE_BASELINE_MAJOR = 24
@@ -102,8 +103,8 @@ def _check_node() -> Check:
 
     raw = ""
     try:
-        raw = subprocess.run([node, "--version"], capture_output=True, text=True, timeout=5).stdout.strip()
-    except Exception:
+        raw = run([node, "--version"], timeout=5).stdout.strip()
+    except Exception:  # noqa: BLE001 - 探测失败只是"版本未知"，不影响其他检查
         raw = ""
 
     parsed = _parse_version(raw)
@@ -143,20 +144,36 @@ def _check_ai(*, probe: bool) -> Check:
     import os
     from pathlib import Path
 
-    from codewiki.ai.client import LLMError, OpenAICompatClient, probe_connectivity, resolve_base_url
+    from codewiki.ai.client import (
+        LLMError,
+        OpenAICompatClient,
+        probe_connectivity,
+        resolve_base_url,
+        resolve_model,
+    )
 
     api_key = os.environ.get("OPENAI_API_KEY", "")
     env_base = os.environ.get("OPENAI_BASE_URL", "")
     model = None
     config_base = None
+    ignored: list[str] = []
     try:
         from codewiki.config import CONFIG_FILENAME, load_config
+        from codewiki.trust import apply_trust_policy, is_trusted
 
-        cfg = load_config(Path.cwd() / CONFIG_FILENAME)
-        model = cfg.ai.model
-        config_base = cfg.ai.base_url
+        report = apply_trust_policy(load_config(Path.cwd() / CONFIG_FILENAME), trusted=is_trusted())
+        model = report.config.ai.model
+        config_base = report.config.ai.base_url
+        ignored = sorted(report.ignored)
     except Exception:  # noqa: BLE001 - doctor 不该因配置坏而崩（那是 load_config 的职责）
         pass
+
+    model = resolve_model(cli_value=None, config_value=model)
+    note = (
+        f"；配置里的 {', '.join(ignored)} 已忽略（codewiki.toml 来自被分析仓库）"
+        if ignored
+        else ""
+    )
 
     try:
         base_url, base_warning = resolve_base_url(cli_value=None, config_value=config_base)
@@ -164,21 +181,23 @@ def _check_ai(*, probe: bool) -> Check:
         return Check("warning", "AI", f"base_url 不可用：{exc}")
 
     if not model and not env_base:
+        if ignored:
+            return Check("warning", "AI", f"模型未由操作者指定{note}")
         return Check("info", "AI", "未配置：纯静态模式（analyze 全功能可用）")
 
     display = model or "(由 base_url 决定)"
     if not api_key and not base_url.startswith(("http://localhost", "http://127.0.0.1", "https://localhost")):
-        return Check("warning", "AI", f"模型 {display} 已配置，但未设置 OPENAI_API_KEY")
+        return Check("warning", "AI", f"模型 {display} 已配置，但未设置 OPENAI_API_KEY{note}")
 
     if not probe:
         if base_warning:
             return Check("warning", "AI", f"已配置 {display}，但{base_warning}")
-        return Check("ok", "AI", f"已配置 {display}（未探测连通性；加 --probe 才真连一次）")
+        return Check("ok", "AI", f"已配置 {display}（未探测连通性；加 --probe 才真连一次）{note}")
 
     ok, detail = probe_connectivity(OpenAICompatClient(model=model or "codewiki-probe", base_url=base_url))
     if base_warning:
         detail = f"{detail}；注意：{base_warning}"
-    return Check("ok" if ok else "warning", "AI", detail)
+    return Check("ok" if ok else "warning", "AI", f"{detail}{note}")
 
 
 def _check_asset_source() -> Check:

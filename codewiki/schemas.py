@@ -10,10 +10,10 @@
 """
 from __future__ import annotations
 
-from datetime import UTC, datetime
-
 from pydantic import BaseModel, Field
 
+from codewiki import __version__
+from codewiki.clock import now_iso
 from codewiki.models import (
     SCHEMA_VERSION,
     Edge,
@@ -58,7 +58,8 @@ class Meta(BaseModel):
     generated_at: str
     repo_root: str | None = None
     repo_commit: str | None = None
-    tool_version: str = "0.1.0"
+    tool_version: str = __version__
+    render_inputs: dict[str, str] = Field(default_factory=dict)
     provenance: dict[str, Provenance] = Field(default_factory=dict)
 
 
@@ -73,11 +74,23 @@ class DataPacket(BaseModel):
     diagnostics: list[Diagnostic] = Field(default_factory=list)
 
     @staticmethod
-    def new_meta(title: str, *, repo_root: str | None = None, repo_commit: str | None = None) -> Meta:
-        """构造 meta（UTC ISO 带 Z，与 IPIP 的时间口径一致）。"""
+    def new_meta(
+        title: str,
+        *,
+        repo_root: str | None = None,
+        repo_commit: str | None = None,
+        generated_at: str | None = None,
+    ) -> Meta:
+        """构造 meta（UTC ISO 带 Z，与 IPIP 的时间口径一致）。
+
+        ``generated_at`` 可由调用方给定（``--timestamp`` / ``SOURCE_DATE_EPOCH``），
+        否则取 :func:`codewiki.clock.now_iso`。可注入是"增量产物 == 全量产物逐字节
+        一致"这条验收的前提 —— 时间戳每次不同，字节比对就永远只能在"排除某字段"
+        的前提下做。
+        """
         return Meta(
             title=title,
-            generated_at=datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+            generated_at=generated_at or now_iso(),
             repo_root=repo_root,
             repo_commit=repo_commit,
         )

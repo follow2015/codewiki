@@ -21,3 +21,6 @@ wiki-output/
 
 # 部署仓（sync-to-deploy.sh 的目标，独立 git 仓，不进主仓）
 codewiki-deploy/
+
+# 评审输入物（外部评审补丁、设计文稿、截图等）：不是产品代码，含内部上下文
+archive/

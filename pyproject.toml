@@ -47,8 +47,23 @@ src = ["."]
 line-length = 110
 # fixtures 里是**故意**写歪的样例（重定义、未使用导入、成环 import），
 # lint 它们等于要求样例像产品代码一样干净 —— 会把能触发边界的样本 lint 掉。
-extend-exclude = ["tests/fixtures"]
+# tests/golden 同理：那是**解析器的输入数据**（黄金样本），不是产品代码。
+extend-exclude = ["tests/fixtures", "tests/golden"]
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "UP", "B", "SIM"]
+select = ["E", "F", "I", "UP", "B", "SIM", "TID"]
 ignore = ["E501"]
+
+# 子进程只有一个入口（codewiki/subproc.py）：shell=False、最小环境、超时即杀
+# 这三件事写在调用点上，下一个新增的调用点就会重犯同样的错（历史上正是
+# ``python -m`` 继承 cwd 让被分析仓库的 json.py 被执行）。用 lint 把这条约束
+# 变成"写的时候就红"，而不是等下一轮评审发现。
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"subprocess".msg = "子进程只能经 codewiki/subproc.py 启动（隔离参数必须只写一处）"
+
+[tool.ruff.lint.per-file-ignores]
+"codewiki/subproc.py" = ["TID251"]
+# 测试与脚本可以用裸 subprocess：前者要**验证**子进程行为（起一个自造脚本看
+# 它是否被执行），后者是压测计时工具。产品代码一律经 codewiki/subproc.py。
+"tests/**" = ["TID251"]
+"scripts/**" = ["TID251"]
