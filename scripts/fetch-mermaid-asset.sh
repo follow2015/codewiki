@@ -8,7 +8,14 @@
 # 升级后请连同新文件一起提交。
 set -euo pipefail
 
-VERSION="${1:-11}"
+#: 当前**入库**的版本。想确认仓里那份到底是哪个版本，看这一行 —— 资产是压缩后
+#: 的产物，文件里没有 banner、grep 不到版本号，不写死在这里就只能靠猜。
+#: 升级三步：改这个值 → 跑本脚本 → 连同新资产一起提交。
+#: ⚠️ 11.x → 12.x 是 breaking，不是"改个数字"：12 把默认布局从 dagre 换成 ELK
+#: （图会重新排布、默认配色也变）、单文件 IIFE 资产增大约 500KB(gzip)、运行时要求
+#: ES2024 与 Safari 17.4+、并移除 defaultRenderer。升之前要先决定观感与浏览器下限。
+PINNED_VERSION="11.17.2"
+VERSION="${1:-$PINNED_VERSION}"
 TARGET="codewiki/assets/mermaid.min.js"
 URL="https://cdn.jsdelivr.net/npm/mermaid@${VERSION}/dist/mermaid.min.js"
 
