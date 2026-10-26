@@ -40,12 +40,21 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: 安装
-        run: python -m pip install -e .
+        run: |
+          python -m pip install -e .
+          python -m pip install ruff
+
+      # pip 默认只打 "Collecting / Downloading" 流水账，想知道"这一轮到底装了
+      # 哪些组件、各自什么版本"得自己在日志里刨。而版本恰恰是出问题时要的第一手
+      # 信息（比如 3.11 与 3.14 两条腿的 networkx 不是同一个版本）。
+      # `--format=freeze` 输出 `pkg==ver`，可直接粘进 issue 或本地复现环境。
+      - name: 组件清单（解析后的确切版本）
+        run: |
+          python -V
+          python -m pip list --format=freeze | sort
 
       - name: Lint（ruff，配置见 pyproject [tool.ruff]）
-        run: |
-          python -m pip install ruff
-          ruff check codewiki
+        run: ruff check codewiki
 
       - name: 语法检查（compileall）
         run: python -m compileall -q codewiki
