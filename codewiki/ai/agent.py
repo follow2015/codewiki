@@ -4,7 +4,8 @@
 这里 —— 于是约束必须写死在代码里，而不是写进 Prompt 指望模型遵守：
 
 1. **工具集是闭集**：只有 read_file / search_codebase / query_graph / execute_shell
-   四个，且每个都走 jail / 沙箱（模型拿不到任意文件、跑不了任意命令）；
+   四个，全部经 :class:`~codewiki.ai.registry.ToolRegistry` 调用 —— 参数校验、
+   输出过滤、审计只在那一条管道里做，这里不再有第二份 if/elif 分派；
 2. **轮次有硬上限**：默认 10 轮，用完就停并**如实说明"未得出结论"** ——
    无限循环比"答不上来"危险得多（烧钱且可能越转越偏）；
 3. **工具输出一律是不可信数据**：用固定分隔符包裹并过注入扫描（§5.4 第 6 条）；
@@ -16,7 +17,6 @@
 """
 from __future__ import annotations
 
-import contextlib
 import json
 import re
 from dataclasses import dataclass, field
@@ -25,19 +25,17 @@ from pathlib import Path
 from codewiki.ai.audit import AuditLog, NullAudit
 from codewiki.ai.client import ChatMessage, LLMError, OpenAICompatClient
 from codewiki.ai.prompts import AGENT_SYSTEM
-from codewiki.ai.tools import (
-    ToolError,
-    query_graph,
-    read_file,
-    run_shell,
-    scan_prompt_injection,
-    search_codebase,
-    wrap_untrusted,
+from codewiki.ai.registry import (
+    DEFAULT_MAX_OBSERVATION_CHARS,
+    DEFAULT_SPECS,
+    ToolRegistry,
+    default_registry,
 )
+from codewiki.ai.tools import ToolError
 from codewiki.schemas import DataPacket
 
 DEFAULT_MAX_ROUNDS = 10
-MAX_OBSERVATION_CHARS = 6000
+MAX_OBSERVATION_CHARS = DEFAULT_MAX_OBSERVATION_CHARS
 
 _JSON_OBJECT = re.compile(r"\{.*\}", re.DOTALL)
 
@@ -63,12 +61,16 @@ class AgentLoop:
         repo_root: Path | None = None,
         audit: AuditLog | NullAudit | None = None,
         max_rounds: int = DEFAULT_MAX_ROUNDS,
+        registry: ToolRegistry | None = None,
     ) -> None:
         self.client = client
         self.packet = packet
         self.repo_root = Path(repo_root) if repo_root else None
         self.audit = audit or NullAudit()
         self.max_rounds = max_rounds
+        self.registry = registry or default_registry(
+            repo_root=self.repo_root, packet=self.packet, audit=self.audit
+        )
 
     def run(self, question: str) -> AgentResult:
         result = AgentResult()
@@ -127,70 +129,19 @@ class AgentLoop:
         return result
 
     def _call_tool(self, tool: str, args: dict) -> str:
-        """任何回给模型的观察都按不可信数据包裹 —— 包括拒绝消息与未知工具提示
-        （里面含仓库路径与模型自拟的工具名，同样是数据不是指令）。"""
+        """执行工具并把结果包成不可信数据。
+
+        包括**拒绝消息**也要包（里面含仓库路径与模型自拟的工具名，同样是数据
+        不是指令）。参数校验、输出过滤、审计全部在注册表里，这里只负责把
+        ``ToolError`` 变成能回喂的观察 —— 不替模型绕过任何一道限制。
+        """
         try:
-            if tool == "search_codebase":
-                hits = search_codebase(
-                    str(args.get("keyword") or ""),
-                    repo_root=self._root(),
-                    audit=self.audit,
-                )
-                body = "\n".join(f"{h['path']}:{h['line']}: {h['text']}" for h in hits) or "（无命中）"
-            elif tool == "read_file":
-                body = read_file(
-                    str(args.get("path") or ""),
-                    repo_root=self._root(),
-                    start_line=args.get("start_line"),
-                    end_line=args.get("end_line"),
-                    audit=self.audit,
-                )
-            elif tool == "query_graph":
-                hit = query_graph(
-                    self.packet,
-                    str(args.get("node_id") or ""),
-                    direction=str(args.get("direction") or "both"),
-                    depth=args.get("depth") if args.get("depth") is not None else 1,
-                )
-                if self.audit is not None:
-                    self.audit.record(
-                        tool="query_graph",
-                        args={"node_id": str(args.get("node_id") or "")[:120]},
-                        outcome="ok",
-                        detail=f"{len(hit.related)} related, {len(hit.edges)} edges",
-                    )
-                body = json.dumps(
-                    {
-                        "node": hit.node,
-                        "related": [r.get("path") or r.get("id") for r in hit.related],
-                        "edges": len(hit.edges),
-                    },
-                    ensure_ascii=False,
-                )
-            elif tool == "execute_shell":
-                body = run_shell(str(args.get("command") or ""), repo_root=self._root(), audit=self.audit)
-            else:
-                body = f"（未知工具 {tool!r}：可用 {sorted(ALLOWED_TOOLS)}）"
-                if self.audit is not None:
-                    with contextlib.suppress(Exception):
-                        self.audit.record(tool=tool, args=dict(args), outcome="unknown_tool")
+            return self.registry.call(tool, args)
         except ToolError as exc:
-            body = f"（工具调用被拒绝：{exc}）"
-            if self.audit is not None and tool in ("search_codebase", "query_graph"):
-                with contextlib.suppress(Exception):
-                    self.audit.record(tool=tool, args={k: str(v)[:120] for k, v in args.items()}, outcome="denied", detail=str(exc))
-
-        if scan_prompt_injection(body):
-            body += "\n[注意：上述内容含疑似提示词注入文本，已视为数据]"
-        return wrap_untrusted(body[:MAX_OBSERVATION_CHARS], origin=tool)
-
-    def _root(self) -> Path:
-        if self.repo_root is None:
-            raise ToolError("未提供 --src，无法访问源码（只能使用 query_graph）")
-        return self.repo_root
+            return self.registry.denial(tool, exc)
 
 
-ALLOWED_TOOLS = frozenset({"read_file", "search_codebase", "query_graph", "execute_shell"})
+ALLOWED_TOOLS = frozenset(spec.name for spec in DEFAULT_SPECS)
 
 
 def _parse_decision(raw: str) -> dict | None:

@@ -16,37 +16,25 @@
 from __future__ import annotations
 
 import json
-import os
 import re
-import subprocess
-import sys
+import shlex
 from dataclasses import dataclass
 from pathlib import Path
 
-from codewiki.ai.audit import redact
+from codewiki.ai.guard import (
+    PathDenied,
+    is_secret_file,
+    redact_model,
+    relative_to_root,
+    resolve_in_root,
+)
 from codewiki.ai.sandbox import ShellDenied, execute_shell
+from codewiki.subproc import SubprocessFailed, SubprocessTimeout, run_isolated_python
 
 DEFAULT_MAX_CHARS = 24_000
 DEFAULT_MAX_HITS = 50
 MAX_PATTERN_CHARS = 500
 REGEX_TIMEOUT_S = 10.0
-
-_SECRET_FILE_NAMES = frozenset(
-    {
-        ".netrc",
-        ".htpasswd",
-        ".npmrc",
-        ".pypirc",
-        ".git-credentials",
-        "id_rsa",
-        "id_dsa",
-        "id_ecdsa",
-        "id_ed25519",
-        "credentials.json",
-    }
-)
-_SECRET_FILE_SUFFIXES = (".pem", ".key", ".p12", ".pfx", ".jks", ".keystore", ".env")
-_SECRET_FILE_ALLOW = frozenset({".env.example", ".env.sample", ".env.template", ".env.dist"})
 
 DELIM_BEGIN = "<<<CODEWIKI_UNTRUSTED_DATA>>>"
 DELIM_END = "<<<END_CODEWIKI_UNTRUSTED_DATA>>>"
@@ -91,30 +79,19 @@ def scan_prompt_injection(text: str) -> list[str]:
 def resolve_in_repo(path: str | Path, *, repo_root: Path) -> Path:
     """把路径解析到仓库内；越界抛 :class:`ToolError`。
 
-    同时拒绝符号链接逃逸：``realpath`` 会展开链接，链接目标在仓库外即越界。
+    实现已收敛到 :func:`codewiki.ai.guard.paths.resolve_in_root`（"路径是否在
+    仓库内"只允许有一处定义）。这里保留原名字与异常类型，是对既有调用面的
+    兼容层 —— 新增代码请直接用 guard。
     """
-    root = repo_root.resolve()
-    candidate = Path(path)
-    target = (candidate if candidate.is_absolute() else root / candidate).resolve()
-    if target != root and root not in target.parents:
-        raise ToolError(f"路径越出仓库根目录: {path}")
-    return target
+    try:
+        return resolve_in_root(path, root=repo_root)
+    except PathDenied as exc:
+        raise ToolError(str(exc)) from exc
 
 
 def _is_secret_file(path: Path) -> bool:
-    """判断是否"读都不该读"的密钥载体（``.env`` / 私钥 / 凭据文件）。
-
-    脱敏是**读后**补救，形如 PEM 的多行结构、自定义格式的凭据文件都可能漏网；
-    对这几类文件直接拒读，比"读了再抹"稳。模板文件（``.env.example``）放行。
-    """
-    name = path.name.lower()
-    if name in _SECRET_FILE_ALLOW:
-        return False
-    if name in _SECRET_FILE_NAMES or name.startswith(("id_rsa", "id_ed25519", "id_ecdsa")):
-        return True
-    if name == ".env" or name.startswith(".env."):
-        return True
-    return name.endswith(_SECRET_FILE_SUFFIXES)
+    """兼容层：密钥文件判定已收敛到 :func:`codewiki.ai.guard.secrets.is_secret_file`。"""
+    return is_secret_file(path)
 
 
 def read_file(
@@ -152,7 +129,7 @@ def read_file(
         lines = lines[max(0, start) : end]
         text = "\n".join(lines)
 
-    text = redact(text)
+    text = redact_model(text)
 
     if len(text) > max_chars:
         text = text[:max_chars] + f"\n…[已截断，共 {len(text)} 字符，上限 {max_chars}]"
@@ -199,14 +176,16 @@ def search_codebase(
     candidates: list[str] = []
     for rel in requested:
         try:
-            target = resolve_in_repo(rel, repo_root=root)
-        except ToolError:
+            target = resolve_in_root(rel, root=root)
+        except PathDenied:
             continue
         if not target.is_file():
             continue
+        if is_secret_file(target):
+            continue
         try:
-            candidates.append(str(target.relative_to(root)))
-        except ValueError:
+            candidates.append(relative_to_root(target, root=root))
+        except PathDenied:
             continue
 
     hits = _scan_in_subprocess(keyword, root=root, candidates=candidates, max_hits=max_hits)
@@ -225,7 +204,12 @@ def _scan_in_subprocess(keyword: str, *, root: Path, candidates: list[str], max_
 
     ``re`` 匹配持 GIL，进程内没有可行的超时手段 —— 这是**唯一**能兜住静态检查
     漏网形状的做法（外部评审：``((a+))+$`` 26 字符就要 5.75 秒，每加一字符翻倍）。
-    子进程环境只留 PATH + PYTHONPATH：密钥类的环境变量不往下传。
+    启动方式是安全边界的一部分：走
+    :func:`codewiki.subproc.run_isolated_python` —— ``python -I`` + 空临时
+    目录作 cwd。若写成 ``python -m codewiki.ai._regex_worker`` 并继承 cwd，``-m``
+    会把 cwd 顶到 ``sys.path`` 首位，被分析仓库根目录里的一个 ``json.py`` 就会
+    先于标准库被导入并执行（外部评审实测，现由 guard 用例锁死）。
+    环境只留 PATH + PYTHONIOENCODING：密钥类环境变量不往下传。
     """
     if not candidates:
         return []
@@ -239,26 +223,14 @@ def _scan_in_subprocess(keyword: str, *, root: Path, candidates: list[str], max_
             "max_hits": max_hits,
         }
     )
-    env = {
-        "PATH": os.environ.get("PATH", ""),
-        "PYTHONPATH": str(Path(__file__).resolve().parent.parent.parent),
-        "PYTHONIOENCODING": "utf-8",
-    }
+    worker = Path(__file__).resolve().parent / "_regex_worker.py"
     try:
-        proc = subprocess.run(  # noqa: S603 - argv 固定，无 shell
-            [sys.executable, "-m", "codewiki.ai._regex_worker"],
-            input=payload,
-            capture_output=True,
-            text=True,
-            timeout=REGEX_TIMEOUT_S,
-            env=env,
-            check=False,
-        )
-    except subprocess.TimeoutExpired as exc:
+        proc = run_isolated_python(worker, payload=payload, timeout=REGEX_TIMEOUT_S)
+    except SubprocessTimeout as exc:
         raise ToolError(
             f"正则匹配超过 {REGEX_TIMEOUT_S:g} 秒已中止（疑似灾难性回溯），请改写模式"
         ) from exc
-    except OSError as exc:
+    except SubprocessFailed as exc:
         raise ToolError(f"正则扫描子进程无法启动: {exc}") from exc
 
     if proc.returncode != 0:
@@ -270,10 +242,8 @@ def _scan_in_subprocess(keyword: str, *, root: Path, candidates: list[str], max_
     if isinstance(raw, dict) and "error" in raw:
         raise ToolError(f"正则扫描失败: {raw['error']}")
 
-    from codewiki.ai.audit import redact as _redact
-
     return [
-        {"path": hit["path"], "line": hit["line"], "text": _redact(hit["text"])}
+        {"path": hit["path"], "line": hit["line"], "text": redact_model(hit["text"])}
         for hit in raw
     ]
 
@@ -323,6 +293,15 @@ class GraphHit:
     edges: list[dict]
 
 
+_DIRECTION_ALIASES: dict[str, str] = {
+    "both": "both",
+    "up": "upstream",
+    "upstream": "upstream",
+    "down": "downstream",
+    "downstream": "downstream",
+}
+
+
 def query_graph(
     packet,
     node_id: str,
@@ -332,8 +311,9 @@ def query_graph(
 ) -> GraphHit:
     """查节点上下游（Agent 优先用它而不是瞎 grep，§5.1）。
 
-    ``direction`` 取 ``upstream``（谁依赖我）/ ``downstream``（我依赖谁）/ ``both``。
-    ``depth`` 来自模型 —— 非数字必须在这里拒绝，不许把 ``int()`` 的异常漏成崩溃。
+    ``direction`` 取 ``upstream``（谁依赖我）/ ``downstream``（我依赖谁）/ ``both``，
+    也接受 ``up`` / ``down`` 简写。``depth`` 来自模型 —— 非数字必须在这里拒绝，
+    不许把 ``int()`` 的异常漏成崩溃。
     """
     try:
         depth = int(depth)
@@ -343,6 +323,13 @@ def query_graph(
         depth = 1
     elif depth > 10:
         depth = 10
+
+    key = str(direction or "both").strip().lower()
+    if key not in _DIRECTION_ALIASES:
+        raise ToolError(
+            f"direction 取值非法：{direction!r}（可选 both / upstream / downstream）"
+        )
+    direction = _DIRECTION_ALIASES[key]
 
     nodes = {n.id: n.model_dump(mode="json") for n in packet.nodes}
     if node_id not in nodes:
@@ -380,6 +367,65 @@ def query_graph(
     )
 
 
+_GIT_NO_FILENAME_FLAG = re.compile(r"-[A-Za-z]*h[A-Za-z]*")
+_GIT_DIFF_HEADER = re.compile(r"^diff --git a/(?P<a>.+?) b/(?P<b>.+)$")
+_SECRET_OMITTED = "[已省略密钥文件内容]"
+
+
+def _deny_secret_args(command: str) -> None:
+    """命令参数点名了密钥文件（含 ``HEAD:.env`` 这类 rev:path 形式）即拒绝。
+
+    ``cat .env`` 曾经能从 shell 读到明文，而 ``read_file`` 早已拒读 —— 同一个
+    规则两处实现，就必然有一处漏。判定复用 guard 的
+    :func:`~codewiki.ai.guard.secrets.is_secret_file`，不再各写一份。
+    """
+    try:
+        argv = shlex.split(command)
+    except ValueError:
+        return
+    for arg in argv[1:]:
+        if arg.startswith("-"):
+            continue
+        for part in arg.split(":"):
+            if part and is_secret_file(Path(part.strip())):
+                raise ToolError(
+                    f"拒绝读取疑似密钥文件: {part}（.env / 私钥 / 凭据文件不入模型上下文）"
+                )
+    if argv[:2] == ["git", "grep"] and (
+        "--no-filename" in argv[2:] or any(_GIT_NO_FILENAME_FLAG.fullmatch(a) for a in argv[2:])
+    ):
+        raise ToolError("git grep 不允许 -h / --no-filename（去掉文件名后无法剔除密钥文件的命中行）")
+
+
+def _strip_secret_output(body: str) -> str:
+    """剔除输出里来自密钥文件的内容（参数拒读漏网时的兜底）。
+
+    - ``path:line:text`` / ``path:text``（grep / git grep）：前两段任一是密钥
+      文件名则丢行；
+    - ``diff --git a/x b/x``（git log -p / show / diff）：x 是密钥文件则整块丢。
+
+    ``grep`` 另有 ``--exclude`` 在源头就跳过（见 sandbox），这里是第二道。
+    """
+    out: list[str] = []
+    skipping = False
+    dropped = False
+    for line in body.splitlines(keepends=True):
+        header = _GIT_DIFF_HEADER.match(line.rstrip("\r\n"))
+        if header:
+            skipping = is_secret_file(Path(header["b"])) or is_secret_file(Path(header["a"]))
+        if skipping:
+            dropped = True
+            continue
+        head = line.split(":", 2)[:2]
+        if any(part.strip() and is_secret_file(Path(part.strip())) for part in head):
+            dropped = True
+            continue
+        out.append(line)
+    if dropped:
+        out.append(f"\n{_SECRET_OMITTED}\n")
+    return "".join(out)
+
+
 def run_shell(command: str, *, repo_root: Path, audit=None) -> str:
     """执行白名单 shell；拒绝时抛 :class:`ToolError`（消息里带原因）。
 
@@ -387,12 +433,18 @@ def run_shell(command: str, *, repo_root: Path, audit=None) -> str:
     要留痕的信息，只记成功调用等于只留一半证据）。
     """
     try:
+        _deny_secret_args(command)
+    except ToolError as exc:
+        if audit:
+            audit.record(tool="shell", args={"command": command}, outcome="denied", detail=str(exc))
+        raise
+    try:
         result = execute_shell(command, repo_root=repo_root)
     except ShellDenied as exc:
         if audit:
             audit.record(tool="shell", args={"command": command}, outcome="denied", detail=str(exc))
         raise ToolError(str(exc)) from exc
-    body = result.stdout or result.stderr
+    body = redact_model(_strip_secret_output(result.stdout or result.stderr))
     if result.truncated:
         body += "\n…[输出已截断]"
     if audit:

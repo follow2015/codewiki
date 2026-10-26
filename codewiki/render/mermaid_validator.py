@@ -133,8 +133,9 @@ def l2_available() -> str | None:
 
 def validate_l2(text: str, *, timeout_s: float = 60.0) -> L2Result:
     """用 mermaid-cli 真实解析一段 Mermaid（临时文件进/出，不落产物目录）。"""
-    import subprocess
     import tempfile
+
+    from codewiki.subproc import SubprocessFailed, SubprocessTimeout, run
 
     program = l2_available()
     if program is None:
@@ -149,10 +150,8 @@ def validate_l2(text: str, *, timeout_s: float = 60.0) -> L2Result:
         else:
             argv = [program, "-i", str(src), "-o", str(out)]
         try:
-            completed = subprocess.run(  # noqa: S603 - 白名单命令，shell=False
-                argv, capture_output=True, text=True, timeout=timeout_s, shell=False
-            )
-        except (subprocess.TimeoutExpired, FileNotFoundError) as exc:
+            completed = run(argv, timeout=timeout_s)
+        except (SubprocessTimeout, SubprocessFailed) as exc:
             return L2Result("invalid", [Issue("L2_TIMEOUT", f"L2 渲染超时/不可执行: {exc}")])
         if completed.returncode == 0 and out.exists():
             return L2Result("ok", [], "mermaid-cli 渲染通过")

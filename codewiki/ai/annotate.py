@@ -22,12 +22,8 @@ from pathlib import Path
 from codewiki.ai.cache import PROMPT_VERSION, ResultCache, TokenBudget, cache_key, digest_of, estimate_tokens
 from codewiki.ai.client import ChatMessage, LLMError, OpenAICompatClient
 from codewiki.ai.prompts import ANNOTATE_SYSTEM, render_annotate_user
-from codewiki.ai.tools import (
-    read_file,
-    resolve_in_repo,
-    scan_prompt_injection,
-    wrap_untrusted,
-)
+from codewiki.ai.registry import default_registry
+from codewiki.ai.tools import resolve_in_repo, scan_prompt_injection
 from codewiki.schemas import Annotation, Diagnostic
 
 SUGGEST_FILENAME = "annotations.suggest.toml"
@@ -125,15 +121,18 @@ def _read_for_prompt(path: str, *, src_root: Path | None) -> tuple[str, str]:
     """取证用的源码片段；取不到就返回 ``( "", "" )``（Prompt 里会显式标注"未取证"）。
 
     返回 ``(raw, wrapped)``：注入扫描必须做在 **raw** 上 —— wrapped 里带着我们
-    自己的合法分隔符，拿去扫描会把每个模块都误报成注入。
+    自己的合法分隔符，拿去扫描会把每个模块都误报成注入。两档都由注册表产出，
+    annotate 不自己调 read_file、也不自己包裹（同一份过滤/审计实现，设计文稿
+    §AI 层安全模型第 2 条"没有第二条读源码的路径"）。
     """
     if src_root is None:
         return "", ""
     try:
-        text = read_file(path, repo_root=src_root, max_chars=MAX_SOURCE_CHARS)
+        return default_registry(repo_root=src_root).call_raw(
+            "read_file", {"path": path}, max_chars=MAX_SOURCE_CHARS
+        )
     except Exception:  # noqa: BLE001 - 取证失败不得中断：退化为"无源码"路径
         return "", ""
-    return text, wrap_untrusted(text, origin=path)
 
 
 def _parse_suggestions(raw: str) -> tuple[list[Suggestion], list[str]]:

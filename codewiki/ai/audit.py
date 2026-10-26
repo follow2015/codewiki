@@ -11,62 +11,24 @@
 from __future__ import annotations
 
 import json
-import re
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
+from codewiki.ai.guard.secrets import redact_audit
+
 AUDIT_FILENAME = "ai-audit.jsonl"
-
-_KEYWORD = (
-    r"password|passwd|pwd|secret|token|api[_-]?key|apikey|access[_-]?key|"
-    r"private[_-]?key|credential|authorization"
-)
-
-_SECRET_PATTERNS = (
-    (
-        re.compile(r"-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----.*?-----END [A-Z0-9 ]*PRIVATE KEY-----", re.S),
-        "***",
-    ),
-    (re.compile(r"-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----"), "***"),
-    (re.compile(r"\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{16,}"), "***"),
-    (re.compile(r"\bgithub_pat_[A-Za-z0-9_]{20,}"), "***"),
-    (re.compile(r"\bAKIA[0-9A-Z]{16}\b"), "***"),
-    (re.compile(r"\bxox[abprs]-[A-Za-z0-9-]{10,}"), "***"),
-    (re.compile(r"\bAIza[0-9A-Za-z_\-]{20,}"), "***"),
-    (re.compile(r"\bsk-[A-Za-z0-9_\-]{8,}"), "***"),
-    (re.compile(r"\bBearer\s+[A-Za-z0-9._\-]{8,}"), "***"),
-    (
-        re.compile(r"(\b[a-z][a-z0-9+.\-]*://[^/\s:@]{1,64}):[^/\s@]{1,128}@", re.I),
-        r"\1:***@",
-    ),
-    (
-        re.compile(
-            rf"\b([A-Za-z0-9_.\-]*?(?:{_KEYWORD})[A-Za-z0-9_.\-]*)(\s*=\s*)"
-            r"(\"[^\"]*\"|'[^']*'|[^\s#]+)",
-            re.I,
-        ),
-        r"\1\2***",
-    ),
-    (
-        re.compile(
-            rf"\b([A-Za-z0-9_.\-]*?(?:{_KEYWORD})[A-Za-z0-9_.\-]*)(\s*:\s*)"
-            r"(\"[^\"]+\"|'[^']+'|[^\s\"']*[0-9_\-./+@:][^\s\"']*)",
-            re.I,
-        ),
-        r"\1\2***",
-    ),
-)
 
 _SUMMARY_LIMIT = 240
 
 
 def redact(text: str) -> str:
-    """脱敏：把疑似密钥整段替换成 ``***``（保留名字与分隔符，便于读懂上下文）。"""
-    out = text
-    for pattern, repl in _SECRET_PATTERNS:
-        out = pattern.sub(repl, out)
-    return out
+    """脱敏（**审计档**：宁可多抹，保留名字与分隔符便于读懂上下文）。
+
+    喂模型请用 :func:`codewiki.ai.guard.secrets.redact_model` —— 那一档不会把
+    ``MAX_TOKENS = 4096`` 这类普通代码抹掉。
+    """
+    return redact_audit(text)
 
 
 def summarize(text: str, *, limit: int = _SUMMARY_LIMIT) -> str:

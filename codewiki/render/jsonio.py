@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from codewiki import __version__
 from codewiki.schemas import DataPacket
 
 PACKET_FILENAME = "codewiki.json"
@@ -37,8 +38,15 @@ def write_packet(packet: DataPacket, out_dir: Path, *, write_schema: bool = True
 
 
 def read_packet(path: Path) -> DataPacket:
-    """读回数据包（供 ``ai-annotate`` / 导入适配器 / 测试使用）。"""
-    return DataPacket.model_validate_json(path.read_text(encoding="utf-8"))
+    """读回数据包（供 ``ai-annotate`` / 导入适配器 / 测试使用）。
+
+    走 :func:`codewiki.packetio.load_packet`：版本过新会明确报错、过旧会迁移 ——
+    直接 ``model_validate_json`` 会让旧版工具把新包"静默丢掉不认识的字段"后照常
+    渲染，产物看着正常、信息已经缺了。
+    """
+    from codewiki.packetio import load_packet
+
+    return load_packet(path)
 
 
 def packet_from_parts(
@@ -52,9 +60,17 @@ def packet_from_parts(
     provenance=None,
     repo_root: str | None = None,
     repo_commit: str | None = None,
+    generated_at: str | None = None,
 ) -> DataPacket:
-    """组装数据包（CLI 与测试共用，避免各写各的 meta）。"""
-    meta = DataPacket.new_meta(title, repo_root=repo_root, repo_commit=repo_commit)
+    """组装数据包（CLI 与测试共用，避免各写各的 meta）。
+
+    ``generated_at`` 由调用方注入（``--timestamp`` / ``SOURCE_DATE_EPOCH``）；
+    不给则取当前时间。可注入是逐字节比对验收的前提，见 ``codewiki.clock``。
+    """
+    meta = DataPacket.new_meta(
+        title, repo_root=repo_root, repo_commit=repo_commit, generated_at=generated_at
+    )
+    meta.tool_version = __version__
     if provenance:
         meta.provenance = provenance
     return DataPacket(

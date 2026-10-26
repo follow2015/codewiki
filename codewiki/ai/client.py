@@ -25,6 +25,7 @@ from codewiki.ai.audit import redact
 
 ENV_API_KEY = "OPENAI_API_KEY"
 ENV_BASE_URL = "OPENAI_BASE_URL"
+ENV_MODEL = "OPENAI_MODEL"
 DEFAULT_BASE_URL = "https://api.openai.com/v1"
 
 
@@ -63,6 +64,27 @@ def resolve_base_url(
             f"曾可借此把 API Key 发往任意服务器）：请改用 --base-url 或环境变量 {ENV_BASE_URL}"
         )
     return validate_base_url(environment.get(ENV_BASE_URL) or DEFAULT_BASE_URL), None
+
+
+def resolve_model(
+    *,
+    cli_value: str | None,
+    config_value: str | None,
+    env: dict[str, str] | None = None,
+) -> str | None:
+    """解析模型名：``--model`` > ``OPENAI_MODEL`` > 配置（若已被信任）。
+
+    与 :func:`resolve_base_url` 的分工：**信任判断不在这里** —— 哪些字段"仓库说了
+    不算"由 :mod:`codewiki.trust` 统一裁决，到这里 ``config_value`` 通常已经是
+    None（被忽略时那条 warning 也由 trust 给出，避免同一个字段报两遍）。
+    """
+    if cli_value:
+        return cli_value
+    environment = env if env is not None else os.environ
+    from_env = environment.get(ENV_MODEL)
+    if from_env:
+        return from_env
+    return config_value
 
 
 class LLMError(Exception):

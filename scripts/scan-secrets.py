@@ -25,9 +25,11 @@ import re
 import sys
 from pathlib import Path
 
+# ── 扫描规则 ────────────────────────────────────────────────────────────────
 RULES: list[tuple[str, re.Pattern, str]] = [
     (
         "IP_ADDR",
+        # 八位组必须 ≤255：非法字面量（999.1.1.1 这类举例值）不按 IP 报。
         re.compile(r"\b(?!0\.0\.0\.0|127\.0\.0\.1|255\.255\.255\.255|localhost)"
                    r"(?:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.){3}"
                    r"(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\b"),
@@ -60,6 +62,10 @@ RULES: list[tuple[str, re.Pattern, str]] = [
     ),
     (
         "PASSWORD_ASSIGN",
+        # 键名允许任意 \w 前缀与可选引号：\b 在 `_` 后不成立（_ 属 \w），
+        # 旧写法对带下划线的键名（`ssh_password`）100% 漏检。
+        # 值允许**不带引号**：裸写或冒号分隔的明文都算，此前一律漏检。
+        # 裸值取到空白为止，占位符/变量名/透传（值等于键名）在后面统一豁免。
         re.compile(
             r"(?i)['\"]?\w*(passwd|password|pwd|secret|api[_-]?key|apikey)['\"]?\s*[=:]\s*"
             r"(?:['\"]([^'\"]{4,})['\"]|(\S{4,}))"
@@ -73,31 +79,39 @@ RULES: list[tuple[str, re.Pattern, str]] = [
     ),
 ]
 
+# ── 变量插值识别：值**整体**是变量引用才放行 ──────────────────────────────
+# 判据必须锚定"整个值"，不能只判"值里出现过花括号"——字面量 `Xy{Ab}9`
+# 只因含一对花括号就被豁免是静默漏报，比没有闸门更危险。
 _VALUE_TAIL = re.compile(r"['\"]([^'\"]*)['\"]\s*$")
 
+#: 占位符 / 间接取值形态（裸值没有引号可依，靠这些形状排除误报）
 _PLACEHOLDER_VALUE = re.compile(
     r"^(?:<.*|\$\{.*|\$\(.*|\{.*|os\..*|getenv.*|environ.*|None|null|\*+|x+|\.+)$",
     re.IGNORECASE,
 )
 _INTERP_SEGMENT = (
-    r"(?:\$\{[^{}]*\}"
-    r"|\$[A-Za-z_][A-Za-z0-9_]*"
-    r"|\{[A-Za-z_][A-Za-z0-9_.\[\]'\"]*\})"
+    r"(?:\$\{[^{}]*\}"                        # ${VAR} / ${VAR:-default}
+    r"|\$[A-Za-z_][A-Za-z0-9_]*"              # $VAR
+    r"|\{[A-Za-z_][A-Za-z0-9_.\[\]'\"]*\})"   # {VAR} / {cfg['k']} / {obj.attr}
 )
 _INTERP_ONLY = re.compile(rf"^{_INTERP_SEGMENT}+$")
 _BRACE_SEGMENT = re.compile(r"(?<!\$)\{[A-Za-z_]")
 _FSTRING_PREFIX = re.compile(r"(?<![\w])[rb]{0,2}f[rb]{0,2}['\"]", re.IGNORECASE)
 
+#: 值整体是**命名空间化的键名**（末段与机密字段同名）——"字段名 → key"映射形态：
+#:     password: 'auth.password'
+#: 刻意要求末段同名，"任意点分标识符都放行"会把真密码一并漏掉。
 _NAMESPACED_KEY_ONLY = re.compile(
     r"^(?:[A-Za-z_][A-Za-z0-9_]*\.)+(?:passwd|password|pwd|secret|api[_-]?key)$",
     re.IGNORECASE,
 )
 
+# ── 白名单：已知安全的 IP/模式（避免误报）──────────────────────────────────
 SAFE_IPS = {
     "0.0.0.0", "127.0.0.1", "255.255.255.255",
-    "1.1.1.1", "8.8.8.8", "8.8.4.4",
-    "1.2.3.4",
-    "239.0.0.1",
+    "1.1.1.1", "8.8.8.8", "8.8.4.4",  # 公共 DNS
+    "1.2.3.4",  # 文档惯用占位 IP
+    "239.0.0.1",  # 多播
     "255.255.255.0", "255.255.0.0", "255.0.0.0",
     "255.255.252.0", "255.255.248.0", "255.255.240.0",
 }
@@ -119,6 +133,7 @@ def is_private_ip(ip: str) -> bool:
         return True
     if o[0] == 100 and 64 <= o[1] <= 127:
         return True
+    # 文档网段 RFC5737
     if o[0] == 192 and o[1] == 0 and o[2] == 2:
         return True
     if o[0] == 198 and o[1] == 51 and o[2] == 100:
@@ -126,6 +141,7 @@ def is_private_ip(ip: str) -> bool:
     return bool(o[0] == 203 and o[1] == 0 and o[2] == 113)
 
 
+# 文件中允许出现 IP 的路径前缀（示例配置 / 文档）
 SAFE_PATH_PREFIXES = (".example", "README", "docs/")
 
 
@@ -139,10 +155,12 @@ def scan_file(path: Path, text: str | None = None) -> list[tuple[int, str, str, 
         except (OSError, UnicodeDecodeError):
             return findings
 
+    # 跳过二进制文件
     if "\x00" in text[:8192]:
         return findings
 
     full = str(path).replace("\\", "/")
+    # 示例文件/文档按文件名或路径片段放行 IP 规则
     is_safe_path = any(path.name.startswith(p) or "/docs/" in full for p in SAFE_PATH_PREFIXES)
 
     for lineno, line in enumerate(text.splitlines(), 1):
@@ -155,6 +173,7 @@ def scan_file(path: Path, text: str | None = None) -> list[tuple[int, str, str, 
                         continue
                     if is_safe_path:
                         continue
+                    # 版本号形如 x.y.z.w（四段 <100 且行内含 version/==）
                     parts = matched.split(".")
                     if (
                         len(parts) == 4
@@ -169,22 +188,32 @@ def scan_file(path: Path, text: str | None = None) -> list[tuple[int, str, str, 
                         continue
                     tail = _VALUE_TAIL.search(m.group(0))
                     value = tail.group(1).strip() if tail else ""
+                    # 裸值（不带引号）：命中后还要排除占位符与间接取值，
+                    # 否则 `password = os.environ[...]` / `password = ${PW}`
+                    # 会把正常写法刷成告警。组序：1=键名 2=引号值 3=裸值。
                     bare = (m.group(3) or "").strip().rstrip(",")
                     if bare and m.group(2) is None:
                         if _PLACEHOLDER_VALUE.match(bare) or re.fullmatch(r"[A-Z][A-Z0-9_]*", bare):
                             continue
+                        # 值与键名同名（参数透传）不是机密
                         if bare == m.group(1):
                             continue
                         value, tail = bare, None
+                    # 值整体是插值（且裸花括号只在 f-string 里才放行）
                     if tail and _INTERP_ONLY.match(value) and (
                         not _BRACE_SEGMENT.search(value)
                         or _FSTRING_PREFIX.search(line)
                     ):
                         continue
+                    # 值是命令替换（以 $( 开头）——运行时计算，非明文
                     if tail and value.startswith("$("):
                         continue
+                    # 值在指代键本身（字段名 → key 的映射）
                     if tail and _NAMESPACED_KEY_ONLY.match(value):
                         continue
+                    # 值整体是 UPPER_SNAKE 的**环境变量名**（指向取值来源，如
+                    # ENV_API_KEY = "OPENAI_API_KEY"）—— 不是明文。真实密码
+                    # 几乎不会是纯大写下划线形态（实测误报据此放宽）。
                     if tail and re.fullmatch(r"[A-Z][A-Z0-9_]*", value):
                         continue
 

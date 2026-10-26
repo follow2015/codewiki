@@ -257,30 +257,38 @@ def diff_packets(base: DataPacket, head: DataPacket) -> Impact:
     result = impact_of(head, changed)
     result.added = added
     result.removed = removed
-    _absorb_removed_dependents(base, result)
+    _absorb_neighbours(base, removed, result)
+    _absorb_neighbours(head, added, result)
     return result
 
 
-def _absorb_removed_dependents(base: DataPacket, result: Impact) -> None:
-    """把"被删模块的引用方"并入影响集合（回 base 图反查）。
+def _absorb_neighbours(packet: DataPacket, ids: list[str], result: Impact) -> None:
+    """把 ``ids`` 在图里的**双向邻居**并入 ``direct``（比"谁引用它"更宽）。
 
-    删除之后 head 图里已经没有指向被删模块的边，反向影响**无从传播** —— 而引用
-    方自身 hash 没变，也不在 changed 里。结果就是引用方的页面不重渲：继续写着
-    "下游 y.py"并链到已删除的 y.md（死链），直到下次全量才自愈。实测删一个模块
-    后 `--incremental` 报"重渲 0 / 复用 N"，而产物里 6 条链接指向不存在的页。
+    模块页同时展示"上游（谁依赖我）"与"下游（我依赖谁）"，所以一条边**任一端**
+    新增或被删，另一端的页面内容就变了 —— 而它自身 hash 没变、也不在 changed 里，
+    只沿 reverse 传播永远找不到它：
+
+    - 删除模块 y：引用方 x 的页面仍写着"下游 y.py"并链到 y.md（死链）；
+    - 新增模块 y：被 y 依赖的 z 的页面没写"下游 y"，而 y 的页面却链到 z，
+      两边互相矛盾。
+
+    两种情况都要到下次全量才自愈，`--incremental` 期间产物是错的。实测症状：
+    删一个模块报"重渲 0 / 复用 N"，而产物里 6 条链接指向不存在的页。
     """
-    if not result.removed:
+    if not ids:
         return
-    reverse = module_graph(base).reverse(copy=True)
-    gone = set(result.removed)
-    dependents: set[str] = set()
-    for removed_id in gone:
-        if removed_id in reverse:
-            dependents.update(reverse.successors(removed_id))
-    dependents -= gone
-    dependents -= set(result.changed)
-    if dependents:
-        result.direct = sorted(set(result.direct) | dependents)
+    graph = module_graph(packet)
+    neighbours: set[str] = set()
+    for node_id in ids:
+        if node_id not in graph:
+            continue
+        neighbours.update(graph.successors(node_id))
+        neighbours.update(graph.predecessors(node_id))
+    skip = set(result.changed) | set(result.added) | set(result.removed)
+    neighbours -= skip
+    if neighbours:
+        result.direct = sorted(set(result.direct) | neighbours)
 
 
 __all__ = [

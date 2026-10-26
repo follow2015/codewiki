@@ -18,6 +18,17 @@ from typing import Protocol, runtime_checkable
 
 from codewiki.models import FileModel
 
+FORMAT_VERSIONS: dict[str, int] = {
+    "ast": 1,
+    "regex": 1,
+    "treesitter": 1,
+}
+
+
+def format_version_of(backend: str) -> int:
+    """取后端的解析结果格式版本；未登记的后端按 0 处理（新增后端需在此登记）。"""
+    return FORMAT_VERSIONS.get(backend, 0)
+
 
 @runtime_checkable
 class Analyzer(Protocol):

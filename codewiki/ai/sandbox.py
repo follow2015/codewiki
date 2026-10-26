@@ -22,9 +22,12 @@ from __future__ import annotations
 import os
 import re
 import shlex
-import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
+
+from codewiki.ai.guard.paths import PathDenied, resolve_in_root
+from codewiki.ai.guard.secrets import EXCLUDE_GLOBS
+from codewiki.subproc import SubprocessFailed, SubprocessTimeout, run
 
 ALLOWED_COMMANDS: dict[str, set[str] | None] = {
     "git": {"log", "show", "diff", "grep", "rev-parse", "ls-files", "status"},
@@ -181,12 +184,16 @@ def _jail_check(arg: str, *, root: Path) -> None:
     （「含 ``/`` 或 ``.``」）筛选，于是 ``ls -R dirlink`` 里指向仓库外的符号
     链接目录整条漏检，能列出仓库外的目录名（外部评审实测面）。不含分隔符的
     取值（``grep`` 的模式、``find`` 的谓词取值）解析后仍落在 root 内，不会被误拒。
+
+    判定实现收敛到 :func:`codewiki.ai.guard.paths.resolve_in_root`
+    —— "路径是否在仓库内"只允许有一处定义。
     """
     if arg.startswith("-") or not arg:
         return
-    candidate = (Path(arg) if Path(arg).is_absolute() else root / arg).resolve()
-    if candidate != root and root not in candidate.parents:
-        raise ShellDenied(f"路径越出仓库根目录: {arg!r}")
+    try:
+        resolve_in_root(arg, root=root)
+    except PathDenied as exc:
+        raise ShellDenied(f"路径越出仓库根目录: {arg!r}") from exc
 
 
 def _check_option(arg: str, policy: _OptionPolicy, *, root: Path, program: str) -> bool:
@@ -332,18 +339,12 @@ def execute_shell(
     ) in _GIT_FORCE_NO_DIFF_SUBCOMMANDS:
         argv = [*argv, "--no-ext-diff", "--no-textconv"]
 
+    if argv[0] == "grep":
+        argv = [*argv, *(f"--exclude={glob}" for glob in EXCLUDE_GLOBS)]
+
     try:
-        completed = subprocess.run(  # noqa: S603 - argv 已过白名单，且 shell=False
-            argv,
-            cwd=root,
-            env=_clean_env(),
-            capture_output=True,
-            text=True,
-            errors="replace",
-            timeout=timeout_s,
-            shell=False,
-        )
-    except subprocess.TimeoutExpired:
+        completed = run(argv, cwd=root, env=_clean_env(), timeout=timeout_s, max_output=max_output)
+    except SubprocessTimeout:
         return ShellResult(
             command=command,
             returncode=124,
@@ -352,18 +353,15 @@ def execute_shell(
             timed_out=True,
             argv=tuple(argv),
         )
-    except FileNotFoundError as exc:
+    except SubprocessFailed as exc:
         raise ShellDenied(f"命令不存在: {argv[0]}") from exc
 
-    stdout = completed.stdout or ""
-    stderr = completed.stderr or ""
-    truncated = len(stdout) > max_output or len(stderr) > max_output
     return ShellResult(
         command=command,
         returncode=completed.returncode,
-        stdout=stdout[:max_output],
-        stderr=stderr[:max_output],
-        truncated=truncated,
+        stdout=completed.stdout,
+        stderr=completed.stderr,
+        truncated=completed.truncated,
         argv=tuple(argv),
     )
 
