@@ -37,6 +37,13 @@ codewiki = "codewiki.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["codewiki*"]
+# ⚠️ 必须显式关掉 namespaces（默认是 true）。开启时 find 会把**任何目录**都当
+# 候选包，于是同步脚本 clone 出来的 `codewiki-deploy/`（里面有一份剥了注释的
+# `codewiki/` 副本）被当成命名空间包，整棵树连同 `scripts/` 一起打进 wheel：
+# 实测未关时产物里有 61 个 `codewiki-deploy/...` 条目。而 CI 不构建 wheel，
+# 这条路径照不出来。
+# 关掉后只认带 `__init__.py` 的真包，`codewiki` 及其子包一个不少（60 个模块）。
+namespaces = false
 
 [tool.setuptools.package-data]
 # mermaid.min.js 随包分发（README 承诺）；不声明则正式 wheel 缺文件
