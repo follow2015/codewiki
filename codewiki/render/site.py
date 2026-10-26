@@ -274,6 +274,7 @@ _PAGE_STYLES = """  :root {
 _MERMAID_INIT = (
     '<script>mermaid.initialize({startOnLoad:true,'
     'maxTextSize:2000000,maxEdges:20000,'
+    'layout:"dagre",look:"classic",'
     'theme:matchMedia("(prefers-color-scheme: dark)").matches?"dark":"neutral"});</script>\n'
 )
 
