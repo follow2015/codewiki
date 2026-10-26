@@ -17,10 +17,13 @@ from __future__ import annotations
 
 import hashlib
 
+from codewiki.layering import UNLAYERED_LAYER_ID
 from codewiki.models import EdgeType, NodeType
 from codewiki.schemas import DataPacket
 
 DYNAMIC_EDGE = "-.->"
+
+UNLAYERED_LABEL = "未分层"
 
 
 def node_id(seed: str) -> str:
@@ -79,6 +82,16 @@ def render_system_context(
         lines.append(f'  subgraph {node_id(layer.id)}["{escape_label(layer.name)}"]')
         members = [m for m in modules if m.layer_id == layer.id]
         for module in _sorted_by_weight(packet, members):
+            label = escape_label(module.path or module.id)
+            lines.append(
+                f'    {node_id(module.id)}["{_annotation_label(packet, module.id, label)}"]'
+            )
+        lines.append("  end")
+
+    unlayered = [m for m in modules if not m.layer_id or m.layer_id == UNLAYERED_LAYER_ID]
+    if unlayered:
+        lines.append(f'  subgraph {node_id(UNLAYERED_LAYER_ID)}["{UNLAYERED_LABEL}"]')
+        for module in _sorted_by_weight(packet, unlayered):
             label = escape_label(module.path or module.id)
             lines.append(
                 f'    {node_id(module.id)}["{_annotation_label(packet, module.id, label)}"]'

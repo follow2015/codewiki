@@ -55,6 +55,16 @@ from codewiki.repo import iter_source_files, repo_commit
 from codewiki.schemas import DataPacket, Diagnostic
 
 
+def _backend_of(analyzer) -> str:  # noqa: ANN001
+    """实际生效的后端名（``auto`` 要解析到真身），用于缓存键与诊断。
+
+    各后端模块都声明了模块级 ``BACKEND``；取不到就退回类名（宁可缓存永不命中，
+    也不要让两个后端共用一份缓存）。
+    """
+    module = sys.modules.get(type(analyzer).__module__)
+    return str(getattr(module, "BACKEND", type(analyzer).__name__))
+
+
 def _analyze(args: argparse.Namespace) -> int:
     root = Path(args.src).resolve()
     out_dir = Path(args.out).resolve()
@@ -87,7 +97,10 @@ def _analyze(args: argparse.Namespace) -> int:
             continue
         key = (
             FileModelCache.key(
-                source.path, mtime_ns_of(root / source.path), content_hash_of(source.content)
+                source.path,
+                mtime_ns_of(root / source.path),
+                content_hash_of(source.content),
+                _backend_of(analyzer),
             )
             if cache
             else None

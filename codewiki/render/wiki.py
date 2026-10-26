@@ -67,7 +67,7 @@ def render_index(packet: DataPacket) -> str:
         where = f"（{item.where}）" if item.where else ""
         lines.append(f"- **error** `{item.code}` {where}：{item.message}")
     lines.append("")
-    lines.append("完整清单见 [diagnostics.md](../diagnostics.md)。")
+    lines.append("完整清单见 [diagnostics.md](diagnostics.md)。")
     lines.append("")
     return "\n".join(lines)
 

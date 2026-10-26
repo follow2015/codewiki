@@ -14,6 +14,7 @@
 """
 from __future__ import annotations
 
+import itertools
 import sys
 from dataclasses import dataclass, field
 
@@ -37,6 +38,8 @@ from codewiki.models import (
 from codewiki.schemas import Diagnostic
 
 MAX_REEXPORT_HOPS = 10
+
+MAX_CYCLES_PER_COMPONENT = 3
 
 
 def module_id(path: str) -> str:
@@ -396,14 +399,30 @@ class GraphBuilder:
             elif edge.type == EdgeType.IMPORTS:
                 module_graph.add_edge(edge.source, edge.target)
 
-        for cycle in nx.simple_cycles(layer_graph):
-            self.diagnostics.append(
-                Diagnostic(
-                    level="error",
-                    code="LAYER_CYCLE",
-                    message="架构分层出现环（分层失效）: " + " → ".join([*cycle, cycle[0]]),
+        for component in nx.strongly_connected_components(layer_graph):
+            if len(component) < 2:
+                continue
+            sub = layer_graph.subgraph(component)
+            probe = list(itertools.islice(nx.simple_cycles(sub), MAX_CYCLES_PER_COMPONENT + 1))
+            for cycle in probe[:MAX_CYCLES_PER_COMPONENT]:
+                self.diagnostics.append(
+                    Diagnostic(
+                        level="error",
+                        code="LAYER_CYCLE",
+                        message="架构分层出现环（分层失效）: " + " → ".join([*cycle, cycle[0]]),
+                    )
                 )
-            )
+            if len(probe) > MAX_CYCLES_PER_COMPONENT:
+                self.diagnostics.append(
+                    Diagnostic(
+                        level="error",
+                        code="LAYER_CYCLE_TRUNCATED",
+                        message=(
+                            f"该分量内除以上 {MAX_CYCLES_PER_COMPONENT} 条环之外还有更多"
+                            f"（这些层两两互相依赖）—— 需要重新划分层边界，而不是逐条修环"
+                        ),
+                    )
+                )
 
         for component in nx.strongly_connected_components(module_graph):
             if len(component) > 1:

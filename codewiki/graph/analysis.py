@@ -15,6 +15,8 @@ from codewiki.schemas import DataPacket, Diagnostic
 
 DEFAULT_CROSS_LAYER_RATIO = 0.5
 DEFAULT_GOD_TOP_N = 10
+
+_GOD_CANDIDATE_FACTOR = 5
 DEFAULT_GOD_MIN_FAN = 3
 
 
@@ -166,9 +168,13 @@ def god_node_diagnostics(
 
     只看度数会把"正常的公共工具模块"误报成上帝模块（度数高但几乎不跨层，
     那是设计好的复用）；只看跨层又会把"只有一个跨层邻居的叶子模块"算成枢纽。
+
+    ``top_n`` 只限制**最终**报几条：先按 fan 截断再过滤会让真正的枢纽被切掉
+    （实测：10 个同层高 fan 模块把 fan 一般但跨层 100% 的枢纽挤出前 N 名，
+    诊断直接返回空）。故这里取一个更大的候选窗口再过滤。
     """
     out: list[Diagnostic] = []
-    for hot in hotspots(packet, top_n=top_n):
+    for hot in hotspots(packet, top_n=max(top_n * _GOD_CANDIDATE_FACTOR, top_n + 20)):
         if hot.fan < min_fan or hot.cross_layer_ratio < cross_layer_ratio:
             continue
         out.append(
@@ -251,7 +257,30 @@ def diff_packets(base: DataPacket, head: DataPacket) -> Impact:
     result = impact_of(head, changed)
     result.added = added
     result.removed = removed
+    _absorb_removed_dependents(base, result)
     return result
+
+
+def _absorb_removed_dependents(base: DataPacket, result: Impact) -> None:
+    """把"被删模块的引用方"并入影响集合（回 base 图反查）。
+
+    删除之后 head 图里已经没有指向被删模块的边，反向影响**无从传播** —— 而引用
+    方自身 hash 没变，也不在 changed 里。结果就是引用方的页面不重渲：继续写着
+    "下游 y.py"并链到已删除的 y.md（死链），直到下次全量才自愈。实测删一个模块
+    后 `--incremental` 报"重渲 0 / 复用 N"，而产物里 6 条链接指向不存在的页。
+    """
+    if not result.removed:
+        return
+    reverse = module_graph(base).reverse(copy=True)
+    gone = set(result.removed)
+    dependents: set[str] = set()
+    for removed_id in gone:
+        if removed_id in reverse:
+            dependents.update(reverse.successors(removed_id))
+    dependents -= gone
+    dependents -= set(result.changed)
+    if dependents:
+        result.direct = sorted(set(result.direct) | dependents)
 
 
 __all__ = [

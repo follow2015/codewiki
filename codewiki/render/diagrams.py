@@ -10,6 +10,7 @@
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -192,6 +193,9 @@ def render_system_index(packet: DataPacket, pages: list[set[str]], *, max_nodes:
     return "\n".join(lines)
 
 
+_UNSAFE_SLUG = re.compile(r"[\"'<>&\s#]")
+
+
 def _slug(path: str) -> str:
     """模块路径 → 文件名（斜杠与扩展名都去掉点号，避免 Windows/URL 麻烦）。
 
@@ -202,9 +206,9 @@ def _slug(path: str) -> str:
     """
     name = path.rsplit("/", 1)[-1]
     stem = path.rsplit(".", 1)[0] if "." in name and name.rsplit(".", 1)[0] else path
-    slug = stem.replace("/", "_").replace("-", "_")
+    slug = _UNSAFE_SLUG.sub("_", stem.replace("/", "_").replace("-", "_"))
     if not slug:
-        slug = "_" + path.replace("/", "_").replace("-", "_")
+        slug = "_" + _UNSAFE_SLUG.sub("_", path.replace("/", "_").replace("-", "_"))
     if slug.startswith("."):
         slug = "_" + slug
     return slug

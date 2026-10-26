@@ -9,7 +9,7 @@ scan-secrets.py — 机密信息扫描器（移植自 ipip 同名脚本，按 co
   1. 公网 IP（RFC1918 / 回环 / 掩码 / 文档网段放行）
   2. 私钥（-----BEGIN ... PRIVATE KEY-----）
   3. 高熵 token（gho_/ghp_/sk-/AKIA 等已知前缀）
-  4. 密码赋值（password = "..." 等明文；占位符与变量插值放行）
+  4. 密码赋值（明文即可，带不带引号都算；占位符与变量插值放行）
   5. 连接字符串含密码（mysql://<user>:<pwd>@host）
 
 与 ipip 版的差异：去掉 MySQL DEFINER、语言包（locales）、OID 上下文豁免
@@ -60,7 +60,10 @@ RULES: list[tuple[str, re.Pattern, str]] = [
     ),
     (
         "PASSWORD_ASSIGN",
-        re.compile(r"(?i)['\"]?\w*(passwd|password|pwd|secret|api[_-]?key|apikey)['\"]?\s*[=:]\s*['\"][^'\"]{4,}['\"]"),
+        re.compile(
+            r"(?i)['\"]?\w*(passwd|password|pwd|secret|api[_-]?key|apikey)['\"]?\s*[=:]\s*"
+            r"(?:['\"]([^'\"]{4,})['\"]|(\S{4,}))"
+        ),
         "明文密码赋值",
     ),
     (
@@ -71,6 +74,11 @@ RULES: list[tuple[str, re.Pattern, str]] = [
 ]
 
 _VALUE_TAIL = re.compile(r"['\"]([^'\"]*)['\"]\s*$")
+
+_PLACEHOLDER_VALUE = re.compile(
+    r"^(?:<.*|\$\{.*|\$\(.*|\{.*|os\..*|getenv.*|environ.*|None|null|\*+|x+|\.+)$",
+    re.IGNORECASE,
+)
 _INTERP_SEGMENT = (
     r"(?:\$\{[^{}]*\}"
     r"|\$[A-Za-z_][A-Za-z0-9_]*"
@@ -115,9 +123,7 @@ def is_private_ip(ip: str) -> bool:
         return True
     if o[0] == 198 and o[1] == 51 and o[2] == 100:
         return True
-    if o[0] == 203 and o[1] == 0 and o[2] == 113:
-        return True
-    return False
+    return bool(o[0] == 203 and o[1] == 0 and o[2] == 113)
 
 
 SAFE_PATH_PREFIXES = (".example", "README", "docs/")
@@ -163,6 +169,13 @@ def scan_file(path: Path, text: str | None = None) -> list[tuple[int, str, str, 
                         continue
                     tail = _VALUE_TAIL.search(m.group(0))
                     value = tail.group(1).strip() if tail else ""
+                    bare = (m.group(3) or "").strip().rstrip(",")
+                    if bare and m.group(2) is None:
+                        if _PLACEHOLDER_VALUE.match(bare) or re.fullmatch(r"[A-Z][A-Z0-9_]*", bare):
+                            continue
+                        if bare == m.group(1):
+                            continue
+                        value, tail = bare, None
                     if tail and _INTERP_ONLY.match(value) and (
                         not _BRACE_SEGMENT.search(value)
                         or _FSTRING_PREFIX.search(line)
@@ -175,9 +188,10 @@ def scan_file(path: Path, text: str | None = None) -> list[tuple[int, str, str, 
                     if tail and re.fullmatch(r"[A-Z][A-Z0-9_]*", value):
                         continue
 
-                if rule_id == "CONN_STRING":
-                    if any(p in m.group(0).lower() for p in ("password", "secret", "your", "xxx", "<")):
-                        continue
+                if rule_id == "CONN_STRING" and any(
+                    p in m.group(0).lower() for p in ("password", "secret", "your", "xxx", "<")
+                ):
+                    continue
 
                 findings.append((lineno, rule_id, matched, desc))
 

@@ -48,8 +48,16 @@ class FileModelCache:
         self.enabled = True
 
     @staticmethod
-    def key(path: str, mtime_ns: int, content_hash: str) -> str:
-        payload = f"{path}|{mtime_ns}|{content_hash}"
+    def key(path: str, mtime_ns: int, content_hash: str, backend: str) -> str:
+        """缓存键：**必须含后端**。
+
+        同一份文件用不同后端解析出的 FileModel 不是一回事（ast 能拿到调用与
+        继承，regex 只有 import 骨架）。键里没有 backend 时，一轮 `--backend ast`
+        之后再来一轮 `--backend regex`，会全部命中 ast 的缓存 —— 用户点名要 regex，
+        拿到的却是 ast 的事实，且 provenance 也跟着说谎。做成必需参数，避免
+        以后新增调用点悄悄漏掉。
+        """
+        payload = f"{backend}|{path}|{mtime_ns}|{content_hash}"
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
     def _path_of(self, key: str) -> Path:

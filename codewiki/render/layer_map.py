@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import html
+import re
 
 from codewiki.layering import UNLAYERED_LAYER_ID
 from codewiki.models import NodeType
@@ -44,6 +45,8 @@ _LAYER_SEMANTIC = {
 
 _UNLAYERED_ID = UNLAYERED_LAYER_ID
 _UNLAYERED_NAME = "未分层"
+
+_UNSAFE_ANCHOR = re.compile(r"[\"'<>&\s#]")
 
 
 def layer_color(name: str) -> str:
@@ -102,8 +105,13 @@ def layer_anchor(lid: str) -> str:
 
     未分层桶的 id 含 ``layer::`` 前缀，直接拼进锚点既难看又像泄漏 ——
     统一给它一个干净的固定锚点。
+
+    id 要落进 ``id="..."`` / ``href="#..."``，因此**必须是安全字符集**：层 id 由
+    被分析仓库的配置提供（不可信），放行引号就能闭合属性注入。
     """
-    return "layer-unlayered" if lid == _UNLAYERED_ID else f"layer-{lid}"
+    if lid == _UNLAYERED_ID:
+        return "layer-unlayered"
+    return "layer-" + _UNSAFE_ANCHOR.sub("_", lid)
 
 
 def _band_svg(y: float, lid: str, name: str, members: list, width: float) -> str:

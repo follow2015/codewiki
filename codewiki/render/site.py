@@ -381,12 +381,12 @@ def render_index_html(packet: DataPacket) -> str:
         name = layer_names.get(lid, "未分层" if lid == UNLAYERED_LAYER_ID else lid.rsplit("::", 1)[-1])
         color = layer_color(name)
         cards = "\n".join(
-            f'    <a class="mod-card" href="{MODULES_SUBDIR}/{slug_map[m.path]}.html">'
+            f'    <a class="mod-card" href="{MODULES_SUBDIR}/{html.escape(slug_map[m.path], quote=True)}.html">'
             f"<code>{html.escape(m.path or '')}</code></a>"
             for m in members
         )
         return (
-            f'  <section class="layer-group" id="{layer_anchor(lid)}">\n'
+            f'  <section class="layer-group" id="{html.escape(layer_anchor(lid), quote=True)}">\n'
             f'    <h2 class="layer-head"><span class="dot" style="--c:{color}"></span>'
             f"{html.escape(name)} <span class=\"count\" data-count=\"{len(members)}\">{len(members)}</span></h2>\n"
             f'    <div class="grid">\n{cards}\n    </div>\n  </section>'
@@ -474,6 +474,8 @@ def write_zip(out_dir: Path, target: Path) -> Path:
     with zipfile.ZipFile(tmp, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         for path in sorted(out_dir.rglob("*")):
             if path.is_dir() or path == tmp or path.name.endswith(".tmp"):
+                continue
+            if path.is_symlink():
                 continue
             archive.write(path, path.relative_to(out_dir).as_posix())
     tmp.replace(target)

@@ -116,6 +116,11 @@ _VIEWER_PLAIN = frozenset(
     }
 )
 
+_VIEWER_DEREF_SHORT: dict[str, frozenset[str]] = {
+    "ls": frozenset("L"),
+    "tree": frozenset("l"),
+}
+
 _OPTION_POLICY: dict[str, _OptionPolicy] = {
     "git": _OptionPolicy(_GIT_PLAIN, _GIT_VALUE, _GIT_SHORT_PLAIN, _GIT_SHORT_VALUE),
     "grep": _OptionPolicy(_GREP_PLAIN, _GREP_VALUE, _GREP_SHORT_PLAIN, _GREP_SHORT_VALUE),
@@ -217,6 +222,12 @@ def _check_option(arg: str, policy: _OptionPolicy, *, root: Path, program: str) 
 
     letters = arg[1:]
     if policy.viewer:
+        deref = _VIEWER_DEREF_SHORT.get(program, frozenset())
+        hit = sorted({ch for ch in letters if ch in deref})
+        if hit:
+            raise ShellDenied(
+                f"{program} 的 -{''.join(hit)} 会跟随符号链接（可读到仓库外的内容）：已拒绝"
+            )
         return False
     if not re.fullmatch(r"[A-Za-z0-9]+", letters):
         raise ShellDenied(f"{program} 短旗标形状非法: {arg!r}")

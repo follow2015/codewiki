@@ -213,10 +213,20 @@ class PythonAstAnalyzer:
             ]
             if parents:
                 parent = max(parents, key=lambda p: p.lineno)
-                symbol.parent = parent.name
-                symbol.qualname = f"{parent.name}.{symbol.name}"
+                parent_qualname = parent.qualname or parent.name
+                symbol.parent = parent_qualname
+                symbol.qualname = f"{parent_qualname}.{symbol.name}"
                 if symbol.kind == "function":
                     symbol.kind = "method"
+
+        qualname_by_name: dict[str, list[str]] = {}
+        for symbol in symbols:
+            if symbol.kind == "class":
+                qualname_by_name.setdefault(symbol.name, []).append(symbol.qualname)
+        for item in inherits:
+            candidates = qualname_by_name.get(item.child, [])
+            if len(candidates) == 1:
+                item.child = candidates[0]
 
         return FileModel(
             path=rel,
