@@ -161,18 +161,31 @@ class ConfigError(Exception):
 
 _TOML_POS = re.compile(r"(?:at\s+line|line)\s*(\d+)", re.I)
 
+_TOML_AT_END = re.compile(r"at end of document", re.I)
 
-def _toml_error_line(exc: tomllib.TOMLDecodeError) -> int | None:
-    """取 TOML 报错行号；取不到返回 ``None``，不编一个出来。
 
-    两条腿都要留：只读属性在 3.11–3.13 恒为 ``None``（CI 上 ``test (3.11)``
-    正是因此变红），只解析消息则在 3.14 的多行 ``msg`` 上容易抓错数字。
+def _toml_error_line(exc: tomllib.TOMLDecodeError, text: str | None = None) -> int | None:
+    """取 TOML 报错行号；确实取不到才返回 ``None``，不编一个出来。
+
+    三条腿，按可靠性排序，缺一条就会在某个版本上掉行号：
+
+    1. ``lineno`` 属性（3.14+）；
+    2. 消息里的 ``(at line N, column M)``（3.11–3.13 唯一的来源，CI 上
+       ``test (3.11)`` 正是因缺这条而红）；
+    3. ``at end of document`` ⇒ 文件末尾，也就是最后一行。3.14 对同一份文本
+       报的就是最后一行，这里补上才能让跨版本口径一致。
     """
     lineno = getattr(exc, "lineno", None)
     if isinstance(lineno, int) and lineno >= 1:
         return lineno
-    match = _TOML_POS.search(str(exc))
-    return int(match.group(1)) if match else None
+
+    message = str(exc)
+    match = _TOML_POS.search(message)
+    if match:
+        return int(match.group(1))
+    if text is not None and _TOML_AT_END.search(message):
+        return text.count(chr(10)) + 1
+    return None
 
 
 def load_config(path: Path) -> CodewikiConfig:
@@ -180,13 +193,14 @@ def load_config(path: Path) -> CodewikiConfig:
     if not path.exists():
         return CodewikiConfig()
 
+    text = path.read_text(encoding="utf-8")
     try:
-        raw = tomllib.loads(path.read_text(encoding="utf-8"))
+        raw = tomllib.loads(text)
     except tomllib.TOMLDecodeError as exc:
         raise ConfigError(
             "TOML 语法错误",
             path=str(path),
-            line=_toml_error_line(exc),
+            line=_toml_error_line(exc, text),
             hint="用支持 TOML 的编辑器检查缩进与引号；或 `codewiki init` 重新生成模板",
         ) from exc
 

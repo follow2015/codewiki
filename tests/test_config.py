@@ -59,14 +59,12 @@ def test_syntax_error_reports_line_number(tmp_path):
     assert "codewiki.toml:1" in message, "必须给出行列号，否则用户无从下手"
 
 
-def test_line_number_survives_python_without_lineno_attr(tmp_path, monkeypatch):
-    """3.11–3.13 的 ``TOMLDecodeError`` 没有 ``lineno``，位置只写在消息里。
+def _emulate_old_tomllib(monkeypatch) -> None:
+    """把 ``tomllib.loads`` 抛出的异常抹成 3.11–3.13 的真实形态。
 
-    CI 的 ``test (3.11)`` 就是在这里红的：只读属性恒为 ``None``，报错里连行号
-    都没有。这条用例把"必须留消息兜底"钉死——删掉兜底它就会红。
+    老版本 ``TOMLDecodeError`` 没有 ``lineno / pos / msg``，位置只写在消息尾巴
+    里。3.14 上置空等价于"属性不存在"，于是本机也能复现老版本的代码路径。
     """
-    bad = tmp_path / CONFIG_FILENAME
-    bad.write_text('[project\nname = "x"\n', encoding="utf-8")
     real_loads = tomllib.loads
 
     def loads_without_lineno(text: str) -> dict:
@@ -79,10 +77,51 @@ def test_line_number_survives_python_without_lineno_attr(tmp_path, monkeypatch):
 
     monkeypatch.setattr(tomllib, "loads", loads_without_lineno)
 
+
+def test_line_number_survives_python_without_lineno_attr(tmp_path, monkeypatch):
+    """3.11–3.13 的 ``TOMLDecodeError`` 没有 ``lineno``，位置只写在消息里。
+
+    CI 的 ``test (3.11)`` 就是在这里红的：只读属性恒为 ``None``，报错里连行号
+    都没有。这条用例把"必须留消息兜底"钉死——删掉兜底它就会红。
+    """
+    bad = tmp_path / CONFIG_FILENAME
+    bad.write_text('[project\nname = "x"\n', encoding="utf-8")
+
+    _emulate_old_tomllib(monkeypatch)
+
     with pytest.raises(ConfigError) as info:
         load_config(bad)
 
     assert f"{CONFIG_FILENAME}:1" in str(info.value), "属性缺失时必须从消息里抠行号"
+
+
+@pytest.mark.parametrize(
+    ("bad_text", "expected_line"),
+    [
+        ("a = 1\nb", 2),
+        ("a = 'unterminated\n", 2),
+    ],
+)
+def test_end_of_document_line_matches_across_python_versions(
+    tmp_path, monkeypatch, bad_text, expected_line
+):
+    """``at end of document`` 类错误：3.14 报最后一行，老版本不能报空。
+
+    两个版本给出的**整条消息必须一字不差**，否则同一个坏配置在 3.11 用户和
+    3.14 用户那里收到的提示不一样，测试矩阵也就失去意义。
+    """
+    bad = tmp_path / CONFIG_FILENAME
+    bad.write_text(bad_text, encoding="utf-8")
+
+    with pytest.raises(ConfigError) as new_python:
+        load_config(bad)
+    assert f"{CONFIG_FILENAME}:{expected_line}" in str(new_python.value)
+
+    _emulate_old_tomllib(monkeypatch)
+    with pytest.raises(ConfigError) as old_python:
+        load_config(bad)
+
+    assert str(old_python.value) == str(new_python.value), "跨版本口径必须一致"
 
 
 def test_type_error_reports_key_and_hint(tmp_path):
