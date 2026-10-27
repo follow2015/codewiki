@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import sys
 
-import codewiki.doctor as doctor
+import codewiki.cli.doctor as doctor
 
 
 def test_python_below_baseline_is_flagged(monkeypatch):

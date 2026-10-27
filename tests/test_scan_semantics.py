@@ -87,20 +87,21 @@ def test_languages_whitelist_filters_scan(tmp_path):
 
 def test_backend_missing_language_is_reported(tmp_path, monkeypatch):
     """注册表里没有的后端语言 ⇒ 显式诊断，不静默消失。"""
-    import codewiki.cli as cli_mod
-    from codewiki.analyzers import REGISTRY, register_defaults
+    from codewiki.analyzers import build_registry
+    from codewiki.pipeline import analyze as pipeline_analyze
 
     root = tmp_path / "repo"
     (root / "src").mkdir(parents=True)
     (root / "src" / "m.ts").write_text("export const x = 1;\n", encoding="utf-8")
     out = tmp_path / "out"
 
-    def _defaults_without_treesitter():
-        register_defaults()
+    def _registry_without_treesitter():
+        registry = build_registry()
         for lang in ("typescript", "tsx", "javascript", "jsx"):
-            REGISTRY._factories.pop((lang, "treesitter"), None)
+            registry._factories.pop((lang, "treesitter"), None)
+        return registry
 
-    monkeypatch.setattr(cli_mod, "register_defaults", _defaults_without_treesitter)
+    monkeypatch.setattr(pipeline_analyze, "build_registry", _registry_without_treesitter)
 
     assert main(["analyze", "--src", str(root), "--out", str(out)]) == 0
 
@@ -112,17 +113,17 @@ def test_backend_missing_language_is_reported(tmp_path, monkeypatch):
 
 def test_parse_failure_visible_without_cache(tmp_path, monkeypatch):
     """--no-cache 时解析失败也要可见（PARSE_FAILED 诊断 + 计数）。"""
-    import codewiki.cli as cli_mod
-    from codewiki.analyzers import REGISTRY, register_defaults
+    from codewiki.analyzers import build_registry
+    from codewiki.pipeline import analyze as pipeline_analyze
 
-    register_defaults()
+    registry = build_registry()
     root = tmp_path / "repo"
     (root / "app").mkdir(parents=True)
     (root / "app" / "good.py").write_text("A = 1\n", encoding="utf-8")
     (root / "app" / "bad.py").write_text("B = 2\n", encoding="utf-8")
     out = tmp_path / "out"
 
-    real = REGISTRY.get("python", "ast")
+    real = registry.get("python", "ast")
 
     class Wrapper:
         language = "python"
@@ -132,11 +133,12 @@ def test_parse_failure_visible_without_cache(tmp_path, monkeypatch):
                 raise SyntaxError("simulated parse failure")
             return real.parse(path, content)
 
-    def _defaults_with_wrapper():
-        register_defaults()
-        REGISTRY.register("python", "ast", Wrapper)
+    def _registry_with_wrapper():
+        reg = build_registry()
+        reg.register("python", "ast", Wrapper)
+        return reg
 
-    monkeypatch.setattr(cli_mod, "register_defaults", _defaults_with_wrapper)
+    monkeypatch.setattr(pipeline_analyze, "build_registry", _registry_with_wrapper)
 
     assert main(["analyze", "--src", str(root), "--out", str(out), "--no-cache"]) == 0
 

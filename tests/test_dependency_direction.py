@@ -24,7 +24,7 @@ ALLOWED: dict[str, frozenset[str]] = {
     "analyzers": frozenset({"core", "subproc"}),
     "graph": frozenset({"core", "subproc"}),
     "render": frozenset({"core", "subproc", "graph"}),
-    "pipeline": frozenset({"core", "subproc"}),
+    "pipeline": frozenset({"core", "subproc", "analyzers", "graph", "render"}),
     "ai": frozenset({"core", "subproc", "guard", "render"}),
     "cli": frozenset({"*"}),
 }
@@ -38,7 +38,7 @@ def _group_of_file(rel: Path) -> str:
         return "guard" if len(parts) > 1 and parts[1] == "guard" else "ai"
     if parts[0] in {"analyzers", "render", "graph", "pipeline"}:
         return parts[0]
-    if parts[0] in {"cli.py", "doctor.py"}:
+    if parts[0] in {"cli", "cli.py", "doctor.py"}:
         return "cli"
     return "core"
 

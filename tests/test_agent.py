@@ -110,11 +110,19 @@ def test_unknown_tool_is_reported_not_executed(mini_py, tmp_path):
 
     assert result.answer == "done"
     assert "未知工具" in client.calls[1][-1].content
-    assert set(ALLOWED_TOOLS) == {"read_file", "search_codebase", "query_graph"}
+    assert set(ALLOWED_TOOLS) == {
+        "read_file",
+        "search_codebase",
+        "query_graph",
+        "git_log",
+        "git_show",
+    }
     assert set(ALLOWED_TOOLS_WITH_SHELL) == {
         "read_file",
         "search_codebase",
         "query_graph",
+        "git_log",
+        "git_show",
         "execute_shell",
     }
 
@@ -200,11 +208,12 @@ def test_agent_cli_audits_even_without_out(tmp_path, monkeypatch, mini_py):
     from pathlib import Path
 
     import codewiki.cli as cli_mod
+    import codewiki.cli.agent_cmd as agent_cmd
     from codewiki.ai.audit import AUDIT_FILENAME
     from tests.conftest import FakeClient
 
     monkeypatch.setattr(
-        cli_mod,
+        agent_cmd,
         "OpenAICompatClient",
         lambda **_kw: FakeClient([_final("答案 A")]),
     )

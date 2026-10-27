@@ -35,6 +35,8 @@ from codewiki.ai.tools import (
     GraphHit,
     ToolError,
     _strip_secret_output,
+    git_log,
+    git_show,
     query_graph,
     read_file,
     run_shell,
@@ -212,6 +214,19 @@ def _tool_query_graph(args: dict[str, Any], ctx: ToolContext) -> str:
     )
 
 
+def _tool_git_log(args: dict[str, Any], ctx: ToolContext) -> str:
+    limit = args.get("limit")
+    return git_log(
+        repo_root=ctx.require_root(),
+        path=args.get("path") or "",
+        limit=20 if limit is None else limit,
+    )
+
+
+def _tool_git_show(args: dict[str, Any], ctx: ToolContext) -> str:
+    return git_show(repo_root=ctx.require_root(), rev=args["rev"], path=args["path"])
+
+
 def _tool_execute_shell(args: dict[str, Any], ctx: ToolContext) -> str:
     return run_shell(args["command"], repo_root=ctx.require_root())
 
@@ -387,6 +402,26 @@ DEFAULT_SPECS: tuple[ToolSpec, ...] = (
             Param("depth", INT, required=False, default=1, hint="1..10"),
         ),
         handler=_tool_query_graph,
+    ),
+    ToolSpec(
+        name="git_log",
+        summary="某条路径的提交历史（固定 argv 模板，不接受选项）",
+        guard="paths.resolve_in_root + subproc 固定 argv（无选项位可注入）",
+        params=(
+            Param("path", STR, required=False, default="", hint="仓库内路径；空 = 全仓"),
+            Param("limit", INT, required=False, default=20, hint="1..100"),
+        ),
+        handler=_tool_git_log,
+    ),
+    ToolSpec(
+        name="git_show",
+        summary="某版本里某个文件的内容（git show <rev>:<path>）",
+        guard="rev 正则（禁 - 开头）+ paths.resolve_in_root + secrets.is_secret_file + subproc 固定 argv",
+        params=(
+            Param("rev", STR, hint="分支 / tag / HEAD~n / 提交号"),
+            Param("path", STR, hint="仓库内路径"),
+        ),
+        handler=_tool_git_show,
     ),
 )
 

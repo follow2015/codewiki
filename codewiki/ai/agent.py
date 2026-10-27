@@ -3,9 +3,11 @@
 与标注（工作流 A）的区别：这里模型**自己决定**下一步调哪个工具，所以风险也在
 这里 —— 于是约束必须写死在代码里，而不是写进 Prompt 指望模型遵守：
 
-1. **工具集是闭集**：只有 read_file / search_codebase / query_graph / execute_shell
-   四个，全部经 :class:`~codewiki.ai.registry.ToolRegistry` 调用 —— 参数校验、
-   输出过滤、审计只在那一条管道里做，这里不再有第二份 if/elif 分派；
+1. **工具集是闭集**：默认只有 read_file / search_codebase / query_graph /
+   git_log / git_show 五个（``execute_shell`` 需 ``--allow-shell`` 显式开启，
+   一个发布周期后删除），全部经 :class:`~codewiki.ai.registry.ToolRegistry`
+   调用 —— 参数校验、输出过滤、审计只在那一条管道里做，这里不再有第二份
+   if/elif 分派；
 2. **轮次有硬上限**：默认 10 轮，用完就停并**如实说明"未得出结论"** ——
    无限循环比"答不上来"危险得多（烧钱且可能越转越偏）；
 3. **工具输出一律是不可信数据**：用固定分隔符包裹并过注入扫描（§5.4 第 6 条）；

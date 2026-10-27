@@ -24,9 +24,11 @@ warning 说明"已忽略、正确的写法是什么"。
 from __future__ import annotations
 
 import os
+import sys
 from dataclasses import dataclass, field
+from pathlib import Path
 
-from codewiki.config import CodewikiConfig
+from codewiki.config import CodewikiConfig, load_config
 
 ENV_TRUST_CONFIG = "CODEWIKI_TRUST_CONFIG"
 
@@ -106,4 +108,22 @@ __all__ = [
     "TrustReport",
     "apply_trust_policy",
     "is_trusted",
+    "load_trusted_config",
 ]
+
+
+def load_trusted_config(path: Path, *, trusted: bool = False) -> CodewikiConfig:
+    """读配置并施加信任策略（``analyze`` / 三个 AI 命令共用的唯一入口）。
+
+    放在这里而不是命令层，是因为流水线（``pipeline.analyze``）也要读配置，而
+    依赖方向禁止 pipeline 反向 import cli。两份实现迟早会漂：一份按信任策略
+    打回默认值、另一份忘了，于是同一个仓库在 ``analyze`` 与 ``ai-annotate``
+    下读到两套 ``[ai]`` 配置。
+
+    warning 直接打到 stderr：这条提示是给**操作者**看的（"你写的这行不算数，
+    要改就加 --base-url"），沉默忽略等于让用户以为配置生效了。
+    """
+    report = apply_trust_policy(load_config(path), trusted=trusted)
+    for warning in report.warnings:
+        print(f"warning: {warning}", file=sys.stderr)
+    return report.config

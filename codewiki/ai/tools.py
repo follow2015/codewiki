@@ -30,7 +30,7 @@ from codewiki.ai.guard import (
     resolve_in_root,
 )
 from codewiki.ai.sandbox import ShellDenied, execute_shell
-from codewiki.subproc import SubprocessFailed, SubprocessTimeout, run_isolated_python
+from codewiki.subproc import SubprocessFailed, SubprocessTimeout, run, run_isolated_python
 
 DEFAULT_MAX_CHARS = 24_000
 DEFAULT_MAX_HITS = 50
@@ -449,11 +449,87 @@ def run_shell(command: str, *, repo_root: Path, audit=None) -> str:
     return body
 
 
+_REV_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._/~^@{}-]{0,200}")
+
+MAX_GIT_LOG_LIMIT = 100
+
+
+def _check_rev(rev: str) -> str:
+    """校验版本引用；不合形状就拒（不猜、不补全）。"""
+    if not _REV_RE.fullmatch(rev):
+        raise ToolError(f"非法的版本引用: {rev!r}（只接受分支/tag/HEAD~n/提交号；不接受以 - 开头的字符串）")
+    return rev
+
+
+def _repo_relative(path: str, *, repo_root: Path) -> str:
+    """把模型给的路径归一化成**仓库相对**的 POSIX 路径。
+
+    绝对路径、``..``、指向仓库外的符号链接都在 :func:`resolve_in_root` 里被拒；
+    归一化则是为了让 git 收到它能理解的路径 —— 传绝对路径 git 会当成 pathspec
+    逃逸出仓库（``git log -- /etc`` 在仓库内是可以跑的）。
+    """
+    try:
+        target = resolve_in_root(path, root=repo_root)
+        return relative_to_root(target, root=repo_root)
+    except PathDenied as exc:
+        raise ToolError(str(exc)) from exc
+
+
+def git_log(*, repo_root: Path, path: str = "", limit: int = 20) -> str:
+    """某条路径的提交历史（**固定 argv 模板**，不接受任何选项）。
+
+    这是取代通用 shell 的两个工具之一：真实需求（"这行是谁改的"）用它能覆盖，
+    而它没有"选项白名单"这个攻击面 —— 模板里没有任何位置能塞进 ``--output=``。
+    """
+    if not 1 <= limit <= MAX_GIT_LOG_LIMIT:
+        raise ToolError(f"limit 需在 1..{MAX_GIT_LOG_LIMIT}（收到 {limit}）")
+    argv = [
+        "git",
+        "--no-pager",
+        "log",
+        "--no-color",
+        "--date=short",
+        "--format=%h %ad %s",
+        f"-n{limit}",
+    ]
+    if path:
+        argv += ["--", _repo_relative(path, repo_root=repo_root)]
+    done = run(argv, cwd=repo_root.resolve())
+    if done.returncode != 0:
+        detail = (done.stderr or done.stdout).strip().splitlines()
+        raise ToolError(f"git log 失败（退出码 {done.returncode}）: {detail[0] if detail else '无输出'}")
+    return done.stdout.strip() or "（无提交记录）"
+
+
+def git_show(*, repo_root: Path, rev: str, path: str) -> str:
+    """某个版本里某个文件的内容（``git show <rev>:<path>``）。
+
+    ``path`` 先过路径 jail，再按**文件名**判密钥 —— 后者必须在读之前：
+    ``read_file`` 早就拒读 ``.env``，而 ``git show HEAD:.env`` 曾经照样把明文
+    交出去，同一个规则两处实现就必然有一处漏。
+    """
+    rev = _check_rev(rev)
+    rel = _repo_relative(path, repo_root=repo_root)
+    if is_secret_file(Path(rel)):
+        raise ToolError(f"拒绝读取疑似密钥文件: {rel}（.env / 私钥 / 凭据文件不入模型上下文）")
+    done = run(["git", "--no-pager", "show", f"{rev}:{rel}"], cwd=repo_root.resolve())
+    if done.returncode != 0:
+        detail = (done.stderr or done.stdout).strip().splitlines()
+        raise ToolError(f"git show 失败（退出码 {done.returncode}）: {detail[0] if detail else '无输出'}")
+    body = redact_model(_strip_secret_output(done.stdout))
+    if done.truncated:
+        body += "\n…[输出已截断]"
+    return body
+
+
 __all__ = [
     "DELIM_BEGIN",
     "DELIM_END",
     "GraphHit",
+    "MAX_GIT_LOG_LIMIT",
     "ToolError",
+    "git_log",
+    "git_show",
     "query_graph",
     "read_file",
     "resolve_in_repo",

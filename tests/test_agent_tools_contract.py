@@ -106,6 +106,20 @@ def _calls(root: Path) -> list[tuple[str, dict]]:
         ("query_graph", {"node_id": "mod::normal.py", "depth": 2}),
         ("query_graph", {"node_id": "mod::missing.py"}),
         ("query_graph", {"node_id": "mod::normal.py", "direction": "sideways"}),
+        ("git_log", {"path": "normal.py"}),
+        ("git_log", {"path": ".env"}),
+        ("git_log", {"path": "../outside.txt"}),
+        ("git_log", {"path": str(root.parent / "outside.txt")}),
+        ("git_log", {"path": "normal.py", "limit": 0}),
+        ("git_log", {"path": "normal.py", "limit": 10_000}),
+        ("git_show", {"rev": "HEAD", "path": "normal.py"}),
+        ("git_show", {"rev": "HEAD", "path": ".env"}),
+        ("git_show", {"rev": "HEAD", "path": "secret.pem"}),
+        ("git_show", {"rev": "HEAD", "path": "evil.txt"}),
+        ("git_show", {"rev": "HEAD", "path": "dirlink/inner.txt"}),
+        ("git_show", {"rev": "HEAD", "path": "../outside.txt"}),
+        ("git_show", {"rev": "--output=/tmp/pwned", "path": "normal.py"}),
+        ("git_show", {"rev": "HEAD; rm -rf /", "path": "normal.py"}),
     ]
 
 

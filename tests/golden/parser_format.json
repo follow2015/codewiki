@@ -1,14 +1,50 @@
 {
-  "ast": {
-    "digest": "f658e45825b40dfe43693f6e0a8f25e0ecee44af18fa95732bc70ef52c7b30eb",
-    "format_version": 1,
-    "imports": 2,
-    "symbols": 6
+  "must_not_emit_calls_or_inherits": [
+    "regex"
+  ],
+  "samples": {
+    "go": "parser_sample.go",
+    "python": "parser_sample.py",
+    "typescript": "parser_sample.ts"
   },
-  "regex": {
-    "digest": "490491bffc7b1e7f083612e32b6e1bc460a4a5e0eb54510ae8605b9c699b6c90",
-    "format_version": 1,
-    "imports": 2,
-    "symbols": 5
+  "backends": {
+    "python": {
+      "ast": {
+        "calls": 1,
+        "digest": "f658e45825b40dfe43693f6e0a8f25e0ecee44af18fa95732bc70ef52c7b30eb",
+        "format_version": 1,
+        "imports": 2,
+        "inherits": 0,
+        "symbols": 6
+      },
+      "regex": {
+        "calls": 0,
+        "digest": "490491bffc7b1e7f083612e32b6e1bc460a4a5e0eb54510ae8605b9c699b6c90",
+        "format_version": 1,
+        "imports": 2,
+        "inherits": 0,
+        "symbols": 5
+      }
+    },
+    "typescript": {
+      "treesitter": {
+        "calls": 2,
+        "digest": "963acf0dfa491253ef015352c402e8c93dc742404a83c0f81b7b1ac87a178d16",
+        "format_version": 1,
+        "imports": 1,
+        "inherits": 1,
+        "symbols": 5
+      }
+    },
+    "go": {
+      "treesitter": {
+        "calls": 1,
+        "digest": "a00f2efc5c47f72ce0381f26f2db167d63bc96ca1729253e712a5fc1e064f2d5",
+        "format_version": 1,
+        "imports": 2,
+        "inherits": 0,
+        "symbols": 5
+      }
+    }
   }
 }

@@ -162,7 +162,7 @@ def test_interrupted_render_does_not_reuse_partial_output(tmp_path, monkeypatch)
     不用"临时目录整体切换"来换取一致性：那会让被复用的页面也要整份拷贝，
     增量的速度优势就没了（设计文稿明确排除）。
     """
-    import codewiki.cli as cli_mod
+    from codewiki.pipeline import analyze as pipeline_analyze
 
     monkeypatch.setenv("SOURCE_DATE_EPOCH", FIXED_EPOCH)
     repo = tmp_path / "repo"
@@ -171,17 +171,17 @@ def test_interrupted_render_does_not_reuse_partial_output(tmp_path, monkeypatch)
     _analyze(repo, out, "--incremental")
 
     _edit_one_file(repo, [])
-    original_render_all = cli_mod.render_all
+    original_render_all = pipeline_analyze.render_all
 
     def _boom(*_a, **_k):
         raise RuntimeError("模拟渲染中途崩溃")
 
-    monkeypatch.setattr(cli_mod, "render_all", _boom)
+    monkeypatch.setattr(pipeline_analyze, "render_all", _boom)
     with pytest.raises(RuntimeError):
         main(["analyze", "--src", str(repo), "--out", str(out), "--incremental"])
 
     assert has_incomplete_marker(out), "崩溃后必须留下中断标记"
-    monkeypatch.setattr(cli_mod, "render_all", original_render_all)
+    monkeypatch.setattr(pipeline_analyze, "render_all", original_render_all)
 
     _analyze(repo, out, "--incremental")
     assert not has_incomplete_marker(out)

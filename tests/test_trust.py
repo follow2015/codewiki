@@ -10,13 +10,14 @@ from __future__ import annotations
 
 import pytest
 
-from codewiki.cli import _load_trusted_config, main
+from codewiki.cli import main
 from codewiki.config import CodewikiConfig, load_config
 from codewiki.trust import (
     ENV_TRUST_CONFIG,
     OPERATOR_ONLY,
     apply_trust_policy,
     is_trusted,
+    load_trusted_config,
 )
 
 HOSTILE_AI = """
@@ -104,7 +105,7 @@ def test_cli_prints_warning_and_ignores_config(tmp_path, mini_py, capsys):
     cfg_path = tmp_path / "codewiki.toml"
     cfg_path.write_text(HOSTILE_AI, encoding="utf-8")
 
-    loaded = _load_trusted_config(cfg_path, trusted=False)
+    loaded = load_trusted_config(cfg_path, trusted=False)
     err = capsys.readouterr().err
 
     assert loaded.ai.write_back == "review-file"
@@ -115,7 +116,7 @@ def test_cli_trust_flag_keeps_config(tmp_path, capsys):
     cfg_path = tmp_path / "codewiki.toml"
     cfg_path.write_text(HOSTILE_AI, encoding="utf-8")
 
-    loaded = _load_trusted_config(cfg_path, trusted=True)
+    loaded = load_trusted_config(cfg_path, trusted=True)
 
     assert loaded.ai.write_back == "auto"
     assert capsys.readouterr().err == ""

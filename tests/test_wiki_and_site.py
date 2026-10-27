@@ -451,3 +451,19 @@ def test_zip_does_not_follow_symlinks(tmp_path):
         names = archive.namelist()
         assert "real.txt" in names and "leak.txt" not in names
         assert "TOP-SECRET" not in archive.read("real.txt").decode()
+
+
+def test_mermaid_initializes_with_explicit_security_level():
+    """``securityLevel`` 必须显式写死，不能靠 mermaid 的默认值。
+
+    图里的标签文本来自被分析仓库（层名、模块路径）。当前 mermaid 的默认就是
+    ``strict``，所以这条断言现在**测不出安全问题**——它测的是"默认值变化时我们
+    会不会发现"：升级后若默认放宽成 ``loose``，标签里的 HTML 会被当标记渲染，
+    而代码一行没改、别的用例全绿。默认值不是契约，写下来才是。
+    """
+    html = render_module_html("# 标题\n\n正文\n", title="页面")
+
+    assert 'securityLevel:"strict"' in html, (
+        "mermaid.initialize 里没有显式的 securityLevel:'strict' —— "
+        "升级 mermaid 时默认值一变，标签里的 HTML 就会被当标记渲染"
+    )

@@ -24,7 +24,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import pytest
 
 import codewiki.ai.tools as tools
-import codewiki.doctor as doctor
+import codewiki.cli.doctor as doctor
 from codewiki.ai.audit import redact
 from codewiki.ai.guard import redact_model
 from codewiki.ai.sandbox import ShellDenied, check_command
