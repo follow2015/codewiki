@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import json
+import re
 import tomllib
 from pathlib import Path
 
@@ -158,6 +159,22 @@ class ConfigError(Exception):
         super().__init__(f"{message}{location}{chr(10)}  {hint}" if hint else f"{message}{location}")
 
 
+_TOML_POS = re.compile(r"(?:at\s+line|line)\s*(\d+)", re.I)
+
+
+def _toml_error_line(exc: tomllib.TOMLDecodeError) -> int | None:
+    """取 TOML 报错行号；取不到返回 ``None``，不编一个出来。
+
+    两条腿都要留：只读属性在 3.11–3.13 恒为 ``None``（CI 上 ``test (3.11)``
+    正是因此变红），只解析消息则在 3.14 的多行 ``msg`` 上容易抓错数字。
+    """
+    lineno = getattr(exc, "lineno", None)
+    if isinstance(lineno, int) and lineno >= 1:
+        return lineno
+    match = _TOML_POS.search(str(exc))
+    return int(match.group(1)) if match else None
+
+
 def load_config(path: Path) -> CodewikiConfig:
     """读取并校验配置；失败抛 :class:`ConfigError`（含行列号与修复建议）。"""
     if not path.exists():
@@ -169,7 +186,7 @@ def load_config(path: Path) -> CodewikiConfig:
         raise ConfigError(
             "TOML 语法错误",
             path=str(path),
-            line=getattr(exc, "lineno", None),
+            line=_toml_error_line(exc),
             hint="用支持 TOML 的编辑器检查缩进与引号；或 `codewiki init` 重新生成模板",
         ) from exc
 

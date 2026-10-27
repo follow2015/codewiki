@@ -9,6 +9,7 @@
 """
 from __future__ import annotations
 
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -56,6 +57,32 @@ def test_syntax_error_reports_line_number(tmp_path):
     message = str(info.value)
     assert "TOML 语法错误" in message
     assert "codewiki.toml:1" in message, "必须给出行列号，否则用户无从下手"
+
+
+def test_line_number_survives_python_without_lineno_attr(tmp_path, monkeypatch):
+    """3.11–3.13 的 ``TOMLDecodeError`` 没有 ``lineno``，位置只写在消息里。
+
+    CI 的 ``test (3.11)`` 就是在这里红的：只读属性恒为 ``None``，报错里连行号
+    都没有。这条用例把"必须留消息兜底"钉死——删掉兜底它就会红。
+    """
+    bad = tmp_path / CONFIG_FILENAME
+    bad.write_text('[project\nname = "x"\n', encoding="utf-8")
+    real_loads = tomllib.loads
+
+    def loads_without_lineno(text: str) -> dict:
+        try:
+            real_loads(text)
+        except tomllib.TOMLDecodeError as exc:
+            exc.lineno = None
+            raise
+        raise AssertionError("样本必须是语法错误，否则这条用例什么都没测")
+
+    monkeypatch.setattr(tomllib, "loads", loads_without_lineno)
+
+    with pytest.raises(ConfigError) as info:
+        load_config(bad)
+
+    assert f"{CONFIG_FILENAME}:1" in str(info.value), "属性缺失时必须从消息里抠行号"
 
 
 def test_type_error_reports_key_and_hint(tmp_path):
