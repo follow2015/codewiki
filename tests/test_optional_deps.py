@@ -6,9 +6,13 @@ CI 实测回归（ubuntu + 纯运行时依赖）：TypeScriptAnalyzer 的
 """
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from codewiki.analyzers import base as analyzer_base
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 
 def test_register_defaults_survives_missing_treesitter_runtime(
@@ -83,3 +87,23 @@ def test_opt_out_keeps_treesitter_out_of_the_registry() -> None:
     registry = analyzer_base.build_registry(allow_treesitter=False)
 
     assert {backend for (_lang, backend) in registry._factories} == {"ast", "regex"}  # noqa: SLF001
+
+
+def test_ci_actually_runs_the_treesitter_suite() -> None:
+    """装了 extra 的那台 runner 必须真跑后端用例，否则它只是一份"跳过的绿"。
+
+    ``tests/test_treesitter_analyzers.py`` 是模块级 importorskip：其它 job 装
+    ``.[dev]``，整个文件被静默跳过（CI 只显示 "1 skipped"，很容易被当成正常）。
+    全仓 11 条用例因此长期没有任何流水线跑过。这条断言把"必须有一个 job 点名跑
+    它"钉在配置上 —— 删掉那一步就红。
+
+    ⚠️ 断言前必须**剥掉 YAML 注释**：本仓注释里到处引用测试文件名，不剥的话
+    注释自己就能满足断言，删掉那一步依然全绿（实测变异存活过一轮）。
+    """
+    raw = (PROJECT_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    code = "\n".join(line for line in raw.splitlines() if not line.lstrip().startswith("#"))
+
+    assert "tests/test_treesitter_analyzers.py" in code, (
+        "没有任何 job 点名跑 treesitter 用例；只靠全量 pytest 的话，未装 extra 的 "
+        "job 会把整个文件跳过，等于没跑"
+    )

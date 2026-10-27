@@ -190,6 +190,13 @@ jobs:
           grep -q '"language": "typescript"' "$RUNNER_TEMP/poly-ts/data/codewiki.json"
           grep -q '"language": "go"' "$RUNNER_TEMP/poly-ts/data/codewiki.json"
 
+      # tests/test_treesitter_analyzers.py 是模块级 importorskip：其它 job 装的是
+      # `.[dev]`，整个文件被**静默跳过**（CI 只显示 "1 skipped"）。全仓 11 条用例
+      # 里，这 11 条此前在任何流水线上都没跑过 —— 只有装了 extra 的这台 runner 能
+      # 跑，所以必须在这里跑，否则它是一份"永远绿、永远没验"的摆设。
+      - name: 后端用例（只有这里装了 extra）
+        run: python -m pytest -p no:randomly tests/test_treesitter_analyzers.py
+
       - name: 不装 extra 时必须优雅降级（不是崩）
         shell: bash
         run: |
