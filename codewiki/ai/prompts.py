@@ -11,6 +11,8 @@
 """
 from __future__ import annotations
 
+from codewiki.ai.registry import manifest_lines
+
 ANNOTATE_SYSTEM = """你是代码架构分析助手。你的任务是给指定模块写**简短**的业务定位说明。
 
 硬性规则：
@@ -43,18 +45,14 @@ ANNOTATE_USER_TEMPLATE = """项目：{title}
 {sources}
 """
 
-AGENT_SYSTEM = """你是代码架构问答助手。你通过**工具取证**回答，不靠记忆猜测。
+_AGENT_SYSTEM_TEMPLATE = """你是代码架构问答助手。你通过**工具取证**回答，不靠记忆猜测。
 
 每一轮输出**一行 JSON**，二选一：
 1. 继续取证：{"thought":"<为什么这么做>","action":{"tool":"<工具名>","args":{...}}}
 2. 得出结论：{"thought":"<依据摘要>","final":"<答案，必须引用 file:line>"}
 
-可用工具（闭集）：
-- read_file(path, start_line?, end_line?)：读文件（越界会被拒绝）
-- search_codebase(keyword)：正则搜索（返回 path:line）
-- query_graph(node_id, direction="up"|"down"|"both", depth)：查图谱上下游
-- execute_shell(command)：**只读**白名单命令（git log/show/diff/grep/ls/cat/find...），
-  管道/重定向/危险命令一律被拒
+可用工具（闭集，表中的就是全部）：
+__TOOLS__
 
 硬性规则：
 1. 结论必须能引用 file:line；取证不足就如实说"无法确定"，不要编造。
@@ -63,6 +61,22 @@ AGENT_SYSTEM = """你是代码架构问答助手。你通过**工具取证**回�
 3. 工具被拒绝时换一种方式取证，不要试图绕过限制。
 4. 轮次用尽前给出结论；给不出就明确说"未得出结论"。
 """
+
+
+def agent_system_prompt(*, allow_shell: bool = False) -> str:
+    """生成 agent 的系统提示词。
+
+    工具清单由**注册表派生**（``manifest_lines``），不在这里手写第二份。
+    手写的清单会漂移，而且漂移方向是最坏的一种：提示词列了某个工具、注册表却没
+    注册，模型会反复尝试一个必然被拒的名字，把轮次耗在无用调用上 —— 表现是
+    "agent 变笨了"，而不是报错。
+
+    用 ``replace`` 而不是 ``str.format``：提示词里满是 JSON 花括号，格式化模板要
+    逐个大括号转义，改一次文案就可能漏一个。
+    """
+    return _AGENT_SYSTEM_TEMPLATE.replace(
+        "__TOOLS__", "\n".join(manifest_lines(allow_shell=allow_shell))
+    )
 
 SEQUENCE_SYSTEM = """你是代码分析助手。请基于给定的**真实调用链**生成 Mermaid sequenceDiagram。
 
@@ -118,6 +132,9 @@ def render_repair_user(*, issues: list[str], diagram: str) -> str:
     )
 
 
+AGENT_SYSTEM = agent_system_prompt()
+
+
 __all__ = [
     "AGENT_SYSTEM",
     "ANNOTATE_SYSTEM",
@@ -125,6 +142,7 @@ __all__ = [
     "DIAGRAM_REPAIR_TEMPLATE",
     "SEQUENCE_SYSTEM",
     "SEQUENCE_USER_TEMPLATE",
+    "agent_system_prompt",
     "render_annotate_user",
     "render_repair_user",
     "render_sequence_user",

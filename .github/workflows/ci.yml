@@ -1,12 +1,68 @@
 name: CI
 
+# 同一份工作流同时服务两个仓：
+#   私有主仓（源码 + tests）→ 跑全量检查
+#   公开发布仓（源码，**不含 tests**）→ 跑不依赖 tests 的那部分
+# 所以凡是用到 tests/ 的步骤都带 `if: hashFiles('tests/**') != ''`。别把这条删掉
+# 改成无条件执行 —— 公开仓会因"找不到 tests"直接红，而那跟代码质量无关。
 on:
   push:
     branches: [main]
   pull_request:
 
+env:
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+
 jobs:
-  check:
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    steps:
+      # ⚠️ action 的 Node 版本由它自己 runs.using 声明，**不是**我们能配的 ——
+      # 项目里没有 Node，也没有 setup-node 的用武之地。声明 node20 的 action 会被
+      # 运行器"强制在 node24 上跑"（当前状态），弃用期结束后直接不能跑。
+      #   checkout       v4 = node20 → v5/v6/v7 = node24
+      #   setup-python   v5 = node20 → v6/v7    = node24
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+
+      - name: 安装（含开发依赖）
+        run: python -m pip install -e '.[dev]'
+
+      # pip 默认只打 "Collecting / Downloading" 流水账，想知道"这一轮到底装了哪些
+      # 组件、各自什么版本"得自己刨。而版本恰恰是出问题时要的第一手信息（比如
+      # 3.11 与 3.14 两条腿的 networkx 不是同一个版本）。`--format=freeze` 输出
+      # `pkg==ver`，可直接粘进 issue 或本地复现环境。
+      - name: 组件清单（解析后的确切版本）
+        run: |
+          python -V
+          python -m pip list --format=freeze | sort
+
+      - name: Lint（ruff，配置见 pyproject [tool.ruff]）
+        run: ruff check codewiki scripts
+
+      # 格式检查**暂不启用**：全仓 111 个文件与 ruff format 默认风格不一致，一次性
+      # 重排会把功能 diff 淹没，且剥注释后是否仍合规要单独验。启用步骤见 CONTRIBUTING。
+
+      - name: 语法检查（compileall）
+        run: python -m compileall -q codewiki
+
+      # README 的承诺与测试用同一套 id 互相指认；公开仓没有 tests，脚本自己会跳过
+      - name: 承诺 ↔ 测试配对
+        run: python scripts/check_guarantees.py
+
+      # 资产是压缩产物、grep 不到版本号，"仓里这份是不是上游那个版本"只能靠哈希对账
+      - name: 离线资产哈希
+        run: bash scripts/fetch-mermaid-asset.sh --verify
+
+      - name: 机密扫描
+        run: python scripts/scan-secrets.py $(git ls-files)
+
+  test:
+    name: test (${{ matrix.python-version }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -14,25 +70,16 @@ jobs:
         # 只验两端，不铺满：
         #   3.11 = requires-python 的下限 —— 验"我们的承诺能不能兑现"
         #   3.14 = 开发基线
-        # 中间的 3.12/3.13 不再单列。语法层面的差异由下面 compileall + ruff 覆盖，
+        # 中间的 3.12/3.13 不再单列。语法层面的差异由 compileall + ruff 覆盖，
         # 而"依赖在某个解释器上根本装不上"这类问题只会在**两端**暴露（实测：
         # networkx 3.7 要 >=3.12，3.11 上直接无解，3.12/3.13 完全测不出来）。
         #
         # 版本号写前缀 `3.14` 而不是 `3.14.7`：setup-python 做的是前缀匹配，会取
-        # 当前最新的 3.14.x（现为 3.14.8）。钉死补丁号换不到可复现性（那要靠 pip
-        # 锁），却有真实代价：上游下架该补丁后 CI 直接红在 setup 步；而且恰好会
-        # 漏掉"新补丁引入回归"。反例就在眼前 —— networkx 3.7 声明
-        # `Requires-Python >=3.12,!=3.14.1`，钉死 3.14.1 就会踩上那个坑。
+        # 当前最新的 3.14.x。钉死补丁号换不到可复现性（那要靠 pip 锁），却有真实
+        # 代价：上游下架该补丁后 CI 直接红在 setup 步，还漏掉补丁级回归。反例就在
+        # 这条约束里：networkx 3.7 声明 `Requires-Python >=3.12,!=3.14.1`。
         python-version: ["3.11", "3.14"]
     steps:
-      # ⚠️ action 的 Node 版本由它自己 runs.using 声明，**不是**我们能配的 ——
-      # 项目里没有 Node，也没有 setup-node 的用武之地。declares node20 的 action
-      # 会被运行器"强制在 node24 上跑"（当前状态），弃用期结束后直接不能跑。
-      # 所以唯一的修法是把 action 升到声明 node24 的版本：
-      #   checkout       v4 = node20 → v5/v6/v7 = node24
-      #   setup-python   v5 = node20 → v6/v7    = node24
-      # node24 要求运行器 ≥ v2.328.0（GitHub-hosted 现为 2.338.0）。
-      # 取最新大版本而非"刚好消警告"的 v5/v6：那两个也会立刻变成同一条债。
       - uses: actions/checkout@v7
 
       - uses: actions/setup-python@v7
@@ -40,33 +87,173 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: 安装
-        run: |
-          python -m pip install -e .
-          python -m pip install ruff
+        run: python -m pip install -e '.[dev]'
 
-      # pip 默认只打 "Collecting / Downloading" 流水账，想知道"这一轮到底装了
-      # 哪些组件、各自什么版本"得自己在日志里刨。而版本恰恰是出问题时要的第一手
-      # 信息（比如 3.11 与 3.14 两条腿的 networkx 不是同一个版本）。
-      # `--format=freeze` 输出 `pkg==ver`，可直接粘进 issue 或本地复现环境。
       - name: 组件清单（解析后的确切版本）
         run: |
           python -V
           python -m pip list --format=freeze | sort
 
-      - name: Lint（ruff，配置见 pyproject [tool.ruff]）
-        run: ruff check codewiki
-
-      - name: 语法检查（compileall）
-        run: python -m compileall -q codewiki
-
+      # 不需要 tests 的端到端检查：跑一遍真实命令，产物文件必须存在。
+      # 它拦的是"能 import 但跑不起来"（入口点、打包、资产路径）。
       - name: 端到端冒烟（对示例仓库出产物）
+        shell: bash
         run: |
-          mkdir -p /tmp/sample/mypkg
-          printf 'X = 1\n' > /tmp/sample/mypkg/mod.py
-          printf '[project]\nname = "sample"\n' > /tmp/sample/pyproject.toml
-          codewiki analyze --src /tmp/sample --out /tmp/sample-out
-          test -f /tmp/sample-out/index.html
-          test -f /tmp/sample-out/data/codewiki.json
+          mkdir -p "$RUNNER_TEMP/sample/pkg"
+          printf 'from pkg.b import f\n' > "$RUNNER_TEMP/sample/pkg/a.py"
+          printf 'def f():\n    return 1\n' > "$RUNNER_TEMP/sample/pkg/b.py"
+          printf '[project]\nname = "sample"\n' > "$RUNNER_TEMP/sample/pyproject.toml"
+          codewiki analyze --src "$RUNNER_TEMP/sample" --out "$RUNNER_TEMP/out"
+          test -f "$RUNNER_TEMP/out/index.html"
+          test -f "$RUNNER_TEMP/out/data/codewiki.json"
+          test -f "$RUNNER_TEMP/out/assets/mermaid.min.js"
+          codewiki cycles --input "$RUNNER_TEMP/out/data/codewiki.json" > /dev/null
 
-      - name: 机密扫描
-        run: python scripts/scan-secrets.py $(git ls-files)
+      - name: pytest
+        if: hashFiles('tests/**') != ''
+        run: python -m pytest -p no:randomly
+
+      # 覆盖率只给安全边界设门槛：它是"越权面是否真被堵死"的最后一道网，值得数字
+      # 约束。其它包不设目标 —— 为凑指标写无用测试比没覆盖率更糟。
+      - name: 覆盖率门槛（ai/guard ≥ 90%）
+        if: hashFiles('tests/**') != ''
+        run: |
+          python -m pytest -p no:randomly tests/ \
+            --cov=codewiki.ai.guard --cov-report=term-missing --cov-fail-under=90
+
+  wheel:
+    name: wheel 构建 + 干净环境冲烟
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+
+      # 为什么不只用 `pip install -e .`：editable 安装直接用源码树，打包配置写错
+      # （漏 package-data、漏子包）它照样能跑 —— 本项目就踩过"wheel 里混进部署副本"
+      # 和"资产不在 wheel 里"两次。构建产物 + 干净环境安装才是真正的交付形态。
+      - name: 构建 wheel 与 sdist
+        run: |
+          python -m pip install build
+          python -m build --wheel --sdist --outdir dist
+
+      - name: 校验 wheel 内容
+        run: |
+          python -c "
+          import glob, zipfile
+          whl = glob.glob('dist/*.whl')
+          assert whl, '没有产出 wheel'
+          names = zipfile.ZipFile(whl[0]).namelist()
+          assert any(n.endswith('assets/mermaid.min.js') for n in names), 'wheel 里缺离线资产'
+          assert any(n.endswith('assets/mermaid.min.js.sha256') for n in names), 'wheel 里缺资产哈希'
+          leaked = [n for n in names if 'deploy' in n]
+          assert not leaked, f'wheel 里混进了部署副本: {leaked[:3]}'
+          print(f'wheel 条目 {len(names)}，资产与哈希都在')
+          "
+
+      - name: 在干净环境安装 wheel 并冲烟
+        shell: bash
+        run: |
+          python -m venv "$RUNNER_TEMP/clean"
+          "$RUNNER_TEMP/clean/bin/python" -m pip install dist/*.whl
+          BIN="$RUNNER_TEMP/clean/bin/codewiki"
+          mkdir -p "$RUNNER_TEMP/proj/pkg"
+          printf 'from pkg.b import f\n' > "$RUNNER_TEMP/proj/pkg/a.py"
+          printf 'def f():\n    return 1\n' > "$RUNNER_TEMP/proj/pkg/b.py"
+          printf '[project]\nname = "demo"\n' > "$RUNNER_TEMP/proj/pyproject.toml"
+          "$BIN" analyze --src "$RUNNER_TEMP/proj" --out "$RUNNER_TEMP/proj-out"
+          "$BIN" export --dir "$RUNNER_TEMP/proj-out" --zip "$RUNNER_TEMP/proj.zip"
+          test -f "$RUNNER_TEMP/proj-out/index.html"
+          test -f "$RUNNER_TEMP/proj-out/assets/mermaid.min.js"
+          test -f "$RUNNER_TEMP/proj.zip"
+          echo "干净环境冲烟通过"
+
+  treesitter:
+    name: 可选后端（extra 与降级两条腿）
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+
+      - name: 安装（带 treesitter extra）
+        run: python -m pip install -e '.[dev,treesitter]'
+
+      # 三条 pin 此前从未在 CI 里被解析过（CI 只装 `-e .`），所以"它们还能不能一起
+      # 装"一直没有证据。装不上属于发布阻断问题，必须在这里暴露。
+      - name: 三条 pin 是否真的能一起装
+        run: python -m pip list --format=freeze | sort | grep -i tree-sitter
+
+      - name: TS/Go 解析（装了 extra 走 treesitter 后端）
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/poly/ts" "$RUNNER_TEMP/poly/go"
+          printf 'export function hi(): number { return 1; }\n' > "$RUNNER_TEMP/poly/ts/a.ts"
+          printf 'package main\n\nfunc main() {}\n' > "$RUNNER_TEMP/poly/go/main.go"
+          codewiki analyze --src "$RUNNER_TEMP/poly" --out "$RUNNER_TEMP/poly-ts" --backend treesitter
+          grep -q '"language": "typescript"' "$RUNNER_TEMP/poly-ts/data/codewiki.json"
+          grep -q '"language": "go"' "$RUNNER_TEMP/poly-ts/data/codewiki.json"
+
+      - name: 不装 extra 时必须优雅降级（不是崩）
+        shell: bash
+        run: |
+          python -m venv "$RUNNER_TEMP/no-extra"
+          "$RUNNER_TEMP/no-extra/bin/python" -m pip install -e .
+          mkdir -p "$RUNNER_TEMP/poly2/ts"
+          printf 'export const x = 1;\n' > "$RUNNER_TEMP/poly2/ts/b.ts"
+          "$RUNNER_TEMP/no-extra/bin/codewiki" analyze --src "$RUNNER_TEMP/poly2" --out "$RUNNER_TEMP/poly-fallback"
+          test -f "$RUNNER_TEMP/poly-fallback/data/codewiki.json"
+
+  other-os:
+    name: smoke (${{ matrix.os }})
+    # 只跑冲烟：符号链接与路径行为随平台不同，全量套件在 Windows 上不稳，而这类
+    # 差异恰恰是本项目最容易被忽略的失效面（路径越界判定依赖 resolve 语义）
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+
+      - name: 安装
+        run: python -m pip install -e '.[dev]'
+
+      - name: 端到端冒烟
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/sample/pkg"
+          printf 'from pkg.b import f\n' > "$RUNNER_TEMP/sample/pkg/a.py"
+          printf 'def f():\n    return 1\n' > "$RUNNER_TEMP/sample/pkg/b.py"
+          printf '[project]\nname = "sample"\n' > "$RUNNER_TEMP/sample/pyproject.toml"
+          codewiki analyze --src "$RUNNER_TEMP/sample" --out "$RUNNER_TEMP/out"
+          test -f "$RUNNER_TEMP/out/index.html"
+          codewiki export --dir "$RUNNER_TEMP/out" --zip "$RUNNER_TEMP/out.zip"
+          test -f "$RUNNER_TEMP/out.zip"
+
+  bench:
+    name: 性能基线（非阻塞）
+    runs-on: ubuntu-latest
+    # 非阻塞：性能受 runner 规格影响，用它做"准入"会变成噪声。它的用途是对照 ——
+    # README 写着 10,000 模块全量 64s / 增量 5s，至少让数字每轮落在日志里可查。
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+
+      - name: 安装
+        run: python -m pip install -e '.[dev]'
+
+      - name: 合成仓库基准（1,000 模块，比 README 的 10,000 小一档以便 CI 跑完）
+        run: python scripts/bench.py --files 1000 --out "$RUNNER_TEMP/bench"

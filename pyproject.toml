@@ -48,12 +48,19 @@ namespaces = false
 [tool.setuptools.package-data]
 # mermaid.min.js 随包分发（README 承诺）；不声明则正式 wheel 缺文件
 # （editable 安装能跑掩盖了这一点 —— 外部评审实测面）
-codewiki = ["assets/*.js"]
+# .sha256 也带上：它不是运行时依赖（每次启动算 5MB 哈希太贵），而是"这份资产
+# 来自哪个上游版本"的证据，出问题时能对得上 tests/test_offline_asset_hash.py。
+codewiki = ["assets/*.js", "assets/*.sha256"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
 addopts = "-q --tb=short"
+# README 的承诺与测试用同一套 id 互相指认，配对关系由 scripts/check_guarantees.py
+# 双向校验（README 有测试没有 ⇒ 承诺没人验证；测试有 README 没有 ⇒ id 拼错）。
+markers = [
+    "guarantee(id): 该用例守护 README 里标注 `<!-- guarantee: id -->` 的那条承诺",
+]
 
 [tool.ruff]
 src = ["."]

@@ -391,13 +391,14 @@ DEFAULT_SPECS: tuple[ToolSpec, ...] = (
         ),
         handler=_tool_query_graph,
     ),
-    ToolSpec(
-        name="execute_shell",
-        summary="只读白名单命令（选项白名单逐条校验）",
-        guard="sandbox 选项白名单 + paths._jail_check + 参数级密钥拒读 + 输出剔除",
-        params=(Param("command", STR, hint="如 git log --oneline -5"),),
-        handler=_tool_execute_shell,
-    ),
+)
+
+SHELL_SPEC = ToolSpec(
+    name="execute_shell",
+    summary="只读白名单命令（选项白名单逐条校验）",
+    guard="sandbox 选项白名单 + paths._jail_check + 参数级密钥拒读 + 输出剔除",
+    params=(Param("command", STR, hint="如 git log --oneline -5"),),
+    handler=_tool_execute_shell,
 )
 
 
@@ -407,8 +408,14 @@ def default_registry(
     packet: Any = None,
     audit: Any = None,
     max_observation_chars: int = DEFAULT_MAX_OBSERVATION_CHARS,
+    allow_shell: bool = False,
 ) -> ToolRegistry:
-    """构造带默认工具集的注册表（每次新建实例，无模块级共享状态）。"""
+    """构造带默认工具集的注册表（每次新建实例，无模块级共享状态）。
+
+    ``allow_shell=False``（默认）时 ``execute_shell`` **不在闭集里** —— 模型的
+    工具清单里没有它，传这个名字会被当作未知工具并记审计。开启后仍走同一条管道
+    （参数校验 → 沙箱 → 过滤 → 审计），不是绕过。
+    """
     registry = ToolRegistry(
         repo_root=repo_root,
         packet=packet,
@@ -417,17 +424,35 @@ def default_registry(
     )
     for spec in DEFAULT_SPECS:
         registry.register(spec)
+    if allow_shell:
+        registry.register(SHELL_SPEC)
     return registry
 
 
-def default_tool_names() -> frozenset[str]:
-    return frozenset(spec.name for spec in DEFAULT_SPECS)
+def default_tool_names(*, allow_shell: bool = False) -> frozenset[str]:
+    """默认闭集的工具名。``allow_shell=True`` 时含 ``execute_shell``。"""
+    names = {spec.name for spec in DEFAULT_SPECS}
+    if allow_shell:
+        names.add(SHELL_SPEC.name)
+    return frozenset(names)
 
 
-def manifest_lines(specs: Iterable[ToolSpec] | None = None) -> list[str]:
-    """工具清单的文本形式（提示词与文档同源，避免手写漂移）。"""
+def manifest_lines(
+    specs: Iterable[ToolSpec] | None = None, *, allow_shell: bool = False
+) -> list[str]:
+    """工具清单的文本形式（提示词与文档同源，避免手写漂移）。
+
+    提示词里能出现的工具必须与实际注册的工具一致：若提示词列了 ``execute_shell``
+    但注册表没注册，模型会反复尝试一个必然被拒的工具，把轮次耗在无用调用上。
+    """
+    if specs is not None:
+        chosen: tuple[ToolSpec, ...] = tuple(specs)
+    elif allow_shell:
+        chosen = (*DEFAULT_SPECS, SHELL_SPEC)
+    else:
+        chosen = DEFAULT_SPECS
     rows = []
-    for spec in specs if specs is not None else DEFAULT_SPECS:
+    for spec in chosen:
         params = []
         for p in spec.params:
             shape = p.kind if p.kind != STR_LIST else "list[str]"
@@ -440,6 +465,7 @@ __all__ = [
     "DEFAULT_MAX_OBSERVATION_CHARS",
     "DEFAULT_SPECS",
     "Param",
+    "SHELL_SPEC",
     "ToolContext",
     "ToolRegistry",
     "ToolSpec",

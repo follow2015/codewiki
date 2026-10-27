@@ -2,13 +2,17 @@
 
 渲染层与 AI 层的唯一输入是这份 JSON；本模块只负责**落盘与读数**，不做任何
 二次加工（避免"渲染时各算各的"，§十三 决策 1）。
+
+构造器 ``packet_from_parts`` 已下沉到 :mod:`codewiki.packetio` —— 导入适配器
+（``graph/importers``）也要造包，而它不该依赖渲染层。这里保留 re-export 只为
+不打断既有调用方，新代码请直接 ``from codewiki.packetio import packet_from_parts``。
 """
 from __future__ import annotations
 
 import json
 from pathlib import Path
 
-from codewiki import __version__
+from codewiki.packetio import packet_from_parts
 from codewiki.schemas import DataPacket
 
 PACKET_FILENAME = "codewiki.json"
@@ -47,40 +51,6 @@ def read_packet(path: Path) -> DataPacket:
     from codewiki.packetio import load_packet
 
     return load_packet(path)
-
-
-def packet_from_parts(
-    *,
-    title: str,
-    layers,
-    nodes,
-    edges,
-    annotations=None,
-    diagnostics=None,
-    provenance=None,
-    repo_root: str | None = None,
-    repo_commit: str | None = None,
-    generated_at: str | None = None,
-) -> DataPacket:
-    """组装数据包（CLI 与测试共用，避免各写各的 meta）。
-
-    ``generated_at`` 由调用方注入（``--timestamp`` / ``SOURCE_DATE_EPOCH``）；
-    不给则取当前时间。可注入是逐字节比对验收的前提，见 ``codewiki.clock``。
-    """
-    meta = DataPacket.new_meta(
-        title, repo_root=repo_root, repo_commit=repo_commit, generated_at=generated_at
-    )
-    meta.tool_version = __version__
-    if provenance:
-        meta.provenance = provenance
-    return DataPacket(
-        meta=meta,
-        layers=list(layers),
-        nodes=list(nodes),
-        edges=[e for e in edges if e.confidence >= 0.0],
-        annotations=list(annotations or []),
-        diagnostics=list(diagnostics or []),
-    )
 
 
 __all__ = [

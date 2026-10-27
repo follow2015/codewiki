@@ -24,12 +24,12 @@ from pathlib import Path
 
 from codewiki.ai.audit import AuditLog, NullAudit
 from codewiki.ai.client import ChatMessage, LLMError, OpenAICompatClient
-from codewiki.ai.prompts import AGENT_SYSTEM
+from codewiki.ai.prompts import agent_system_prompt
 from codewiki.ai.registry import (
     DEFAULT_MAX_OBSERVATION_CHARS,
-    DEFAULT_SPECS,
     ToolRegistry,
     default_registry,
+    default_tool_names,
 )
 from codewiki.ai.tools import ToolError
 from codewiki.schemas import DataPacket
@@ -62,20 +62,25 @@ class AgentLoop:
         audit: AuditLog | NullAudit | None = None,
         max_rounds: int = DEFAULT_MAX_ROUNDS,
         registry: ToolRegistry | None = None,
+        allow_shell: bool = False,
     ) -> None:
         self.client = client
         self.packet = packet
         self.repo_root = Path(repo_root) if repo_root else None
         self.audit = audit or NullAudit()
         self.max_rounds = max_rounds
+        self.allow_shell = allow_shell
         self.registry = registry or default_registry(
-            repo_root=self.repo_root, packet=self.packet, audit=self.audit
+            repo_root=self.repo_root,
+            packet=self.packet,
+            audit=self.audit,
+            allow_shell=allow_shell,
         )
 
     def run(self, question: str) -> AgentResult:
         result = AgentResult()
         history: list[ChatMessage] = [
-            ChatMessage(role="system", content=AGENT_SYSTEM),
+            ChatMessage(role="system", content=agent_system_prompt(allow_shell=self.allow_shell)),
             ChatMessage(role="user", content=f"问题：{question}"),
         ]
 
@@ -141,7 +146,8 @@ class AgentLoop:
             return self.registry.denial(tool, exc)
 
 
-ALLOWED_TOOLS = frozenset(spec.name for spec in DEFAULT_SPECS)
+ALLOWED_TOOLS = default_tool_names()
+ALLOWED_TOOLS_WITH_SHELL = default_tool_names(allow_shell=True)
 
 
 def _parse_decision(raw: str) -> dict | None:
@@ -157,4 +163,10 @@ def _parse_decision(raw: str) -> dict | None:
     return data if isinstance(data, dict) else None
 
 
-__all__ = ["ALLOWED_TOOLS", "AgentLoop", "AgentResult", "DEFAULT_MAX_ROUNDS"]
+__all__ = [
+    "ALLOWED_TOOLS",
+    "ALLOWED_TOOLS_WITH_SHELL",
+    "AgentLoop",
+    "AgentResult",
+    "DEFAULT_MAX_ROUNDS",
+]

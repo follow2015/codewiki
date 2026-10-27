@@ -16,11 +16,11 @@
 """
 from __future__ import annotations
 
-import html
 import re
 
 from codewiki.layering import UNLAYERED_LAYER_ID
 from codewiki.models import NodeType
+from codewiki.render.escape import escape_attr
 from codewiki.schemas import DataPacket
 
 _LAYER_PALETTE = (
@@ -90,7 +90,7 @@ def cross_layer_flows(packet: DataPacket, *, top: int = 10):
 
 
 def _esc(text: str) -> str:
-    return html.escape(str(text), quote=True)
+    return escape_attr(str(text))
 
 
 def _display_name(lid: str, names: dict[str, str]) -> str:

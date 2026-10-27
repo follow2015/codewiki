@@ -12,8 +12,9 @@
 
 - **零网络依赖的静态链路**：Python AST 后端 + 正则降级后端，断网机器照常出全套产物。
 - **图谱是唯一事实源**：渲染、AI、环检测、diff 全部消费同一份数据包，不各算各的。
-- **静态优先、不伪造**：解析不到的调用落 `External` 或低置信动态边，绝不随机绑定。
-- **离线可看图**：`assets/mermaid.min.js` 随包分发，换机器双击 HTML 也能看架构图。
+- **静态优先、不伪造**：解析不到的调用落 `External` 或低置信动态边，绝不随机绑定；
+  离线资源缺失只记 `ASSET_MISSING` 诊断，不假装"双击可看图"。 <!-- guarantee: no-fake-asset -->
+- **离线可看图**：`assets/mermaid.min.js` 随包分发，换机器双击 HTML 也能看架构图。 <!-- guarantee: offline-diagram -->
 - **大仓不崩**：节点超限自动按层分包；增量分析（改动 <5% 秒级出结果）。
 - **分层架构地图**：首页内联 SVG（层带卡片 + 跨层引用 TOP），分层泄漏一眼可见。
 - **可选 AI 层**：架构标注 / 交互问答，工具闭集 + 沙箱 + 审计，AI 整段缺失等同关闭。
@@ -93,12 +94,12 @@ codewiki merge-annotations /tmp/ai/suggestions/annotations.suggest.toml
 `codewiki.toml` 来自被分析仓库，因此 `[ai]` 里的 **`model` / `base_url` / `write_back`
 只认命令行与环境变量**（写在文件里会被忽略并提示原因）——否则 hostile 仓库可以把
 API Key 发往任意地址，或让 AI 建议直接合进主配置。自己拥有的仓库要保留文件写法时，
-加 `--trust-config`（或 `CODEWIKI_TRUST_CONFIG=1`）显式授权。
+加 `--trust-config`（或 `CODEWIKI_TRUST_CONFIG=1`）显式授权。 <!-- guarantee: ai-config-trust -->
 
 三条硬约束：AI **不改写静态产物**、**不直写主配置**（合并且由人发起）、
 **受保护注解（human/reviewed）连 `--force` 也不动**；取证行号不可验证的建议
 一律丢弃并记诊断。`agent` 问答的工具是闭集、shell 走白名单沙箱、轮次有硬上限、
-工具输出一律当作不可信数据、每次调用都审计。
+工具输出一律当作不可信数据、每次调用都审计。 <!-- guarantee: ai-closed-toolset -->
 
 ## 性能基线（合成仓库）
 
@@ -108,10 +109,14 @@ API Key 发往任意地址，或让 AI 建议直接合进主配置。自己拥�
 | 增量（改 2% = 200 文件） | 10,000 | **5.0s** | 636MB |
 | 首次全量 | 5,000 | 11.5s | — |
 
-增量靠两层：FileModel 缓存（键 = 后端 + 解析格式版本 + 路径 + mtime + 内容 hash）+
+增量靠两层：FileModel 缓存（键 = 后端 + 解析格式版本 + 路径 + mtime + 内容 hash）+ <!-- guarantee: cache-key-has-format-version -->
 **增量渲染**（只重渲"改动 ∪ 影响闭包"内的模块页与图）。渲染输入指纹（分层、注解、
 `min_confidence`、`max_nodes`、语言白名单、工具/格式版本）任一项变化即自动退回全量，
-诊断里点名是哪一项变了；上一轮没跑完会留 `.incomplete` 标记，下一轮据此全量重渲。
+诊断里点名是哪一项变了；上一轮没跑完会留 `.incomplete` 标记，下一轮据此全量重渲。 <!-- guarantee: single-version-source -->
+
+**增量产物与全量产物逐字节一致**：改文件 / 新增 / 删除 / 重命名 / 改分层 /
+改 `min_confidence` / 换解析后端 / 升工具版本，八种变更都比对过完整产物树；
+渲染中途抛异常会留 `.incomplete`，下一轮不复用残缺产物。 <!-- guarantee: incremental-equals-full -->
 
 ## 关于本仓
 

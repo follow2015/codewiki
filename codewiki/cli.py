@@ -38,7 +38,7 @@ from codewiki.graph.suggest_layers import (
     suggest_layers,
 )
 from codewiki.models import FileModel
-from codewiki.packetio import PacketError, load_packet, load_packet_or_none
+from codewiki.packetio import PacketError, load_packet, load_packet_or_none, packet_from_parts
 from codewiki.pipeline.incremental import (
     INCOMPLETE_MARKER,
     changed_components,
@@ -48,7 +48,7 @@ from codewiki.pipeline.incremental import (
     write_incomplete_marker,
 )
 from codewiki.render.diagrams import render_all
-from codewiki.render.jsonio import packet_from_parts, write_packet
+from codewiki.render.jsonio import write_packet
 from codewiki.render.mermaid_cycle import render_all_cycles
 from codewiki.render.site import (
     INDEX_HTML,
@@ -748,6 +748,7 @@ def _agent_cmd(args: argparse.Namespace) -> int:
             repo_root=Path(args.src).resolve() if args.src else None,
             audit=audit,
             max_rounds=args.max_rounds,
+            allow_shell=bool(getattr(args, "allow_shell", False)),
         )
         result = loop.run(question)
 
@@ -939,6 +940,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="信任配置里的 [ai] base_url/model/write_back（默认忽略：该文件来自被分析仓库）",
     )
     agent_cmd.add_argument("--max-rounds", type=int, default=10, help="最大取证轮次（防无限循环）")
+    agent_cmd.add_argument(
+        "--allow-shell",
+        action="store_true",
+        help="允许模型调用 execute_shell（只读白名单命令）。默认关闭",
+    )
     agent_cmd.add_argument("--out", help="审计日志目录（默认与数据包同级的产物根目录）")
     agent_cmd.set_defaults(func=_agent_cmd)
 

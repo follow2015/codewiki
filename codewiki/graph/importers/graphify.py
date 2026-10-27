@@ -20,7 +20,7 @@ import json
 from pathlib import Path
 
 from codewiki.models import CONF_DYNAMIC, CONF_STATIC, Edge, EdgeType, Node, NodeType, Provenance
-from codewiki.render.jsonio import packet_from_parts
+from codewiki.packetio import packet_from_parts
 from codewiki.schemas import DataPacket, Diagnostic
 
 BACKEND = "graphify"

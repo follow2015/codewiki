@@ -1,4 +1,4 @@
-"""数据包读取的唯一入口：校验版本、必要时迁移（设计文稿 §数据包与增量分析）。
+"""数据包的唯一门面：构造、读取、迁移（设计文稿 §数据包与增量分析）。
 
 此前 ``codewiki.json`` 在至少三处各自 ``model_validate_json`` —— 于是"版本"这件事
 只在文件里躺着一个数字，没人读它：
@@ -9,6 +9,10 @@
 - 每处读包的报错文案与"坏包算不算错误"的判断也各不相同。
 
 这里把三件事一次定死：**版本更旧就迁移、版本更新就明确报错、坏包给可读原因**。
+
+构造也放在这里，而不是留在 ``render/jsonio.py``：导入器（``graph/importers``）
+要产出数据包，但它不该依赖渲染层 —— 那会形成 ``graph → render`` 的环，让"渲染
+层随便改"和"导入层随便改"互相牵连。构造只需要 ``schemas`` 与版本号。
 """
 from __future__ import annotations
 
@@ -17,6 +21,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from codewiki import __version__
 from codewiki.models import SCHEMA_VERSION
 from codewiki.schemas import DataPacket
 
@@ -95,6 +100,40 @@ def load_packet_or_none(path: Path) -> DataPacket | None:
         return None
 
 
+def packet_from_parts(
+    *,
+    title: str,
+    layers,
+    nodes,
+    edges,
+    annotations=None,
+    diagnostics=None,
+    provenance=None,
+    repo_root: str | None = None,
+    repo_commit: str | None = None,
+    generated_at: str | None = None,
+) -> DataPacket:
+    """组装数据包（CLI、导入器与测试共用，避免各写各的 meta）。
+
+    ``generated_at`` 由调用方注入（``--timestamp`` / ``SOURCE_DATE_EPOCH``）；
+    不给则取当前时间。可注入是逐字节比对验收的前提，见 ``codewiki.clock``。
+    """
+    meta = DataPacket.new_meta(
+        title, repo_root=repo_root, repo_commit=repo_commit, generated_at=generated_at
+    )
+    meta.tool_version = __version__
+    if provenance:
+        meta.provenance = provenance
+    return DataPacket(
+        meta=meta,
+        layers=list(layers),
+        nodes=list(nodes),
+        edges=[e for e in edges if e.confidence >= 0.0],
+        annotations=list(annotations or []),
+        diagnostics=list(diagnostics or []),
+    )
+
+
 __all__ = [
     "MIGRATIONS",
     "PacketError",
@@ -102,4 +141,5 @@ __all__ = [
     "load_packet",
     "load_packet_or_none",
     "migrate_packet",
+    "packet_from_parts",
 ]

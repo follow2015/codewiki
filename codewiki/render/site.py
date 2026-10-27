@@ -11,7 +11,6 @@
 """
 from __future__ import annotations
 
-import html
 import re
 import zipfile
 from pathlib import Path
@@ -19,6 +18,7 @@ from pathlib import Path
 from codewiki.layering import UNLAYERED_LAYER_ID
 from codewiki.models import NodeType
 from codewiki.render.diagrams import build_slug_map
+from codewiki.render.escape import escape_attr, escape_text
 from codewiki.render.layer_map import layer_anchor, layer_color, render_layer_map_svg
 from codewiki.render.wiki import MODULES_SUBDIR
 from codewiki.schemas import DataPacket, Diagnostic
@@ -80,7 +80,7 @@ def md_to_html(md: str) -> str:
                 body.append(lines[i])
                 i += 1
             i += 1
-            text = html.escape("\n".join(body))
+            text = escape_text("\n".join(body))
             if lang == "mermaid":
                 out.append(f'<pre class="mermaid">{text}\n</pre>')
             else:
@@ -91,7 +91,7 @@ def md_to_html(md: str) -> str:
         if heading:
             flush_para()
             level = min(len(heading.group(1)), 6)
-            out.append(f"<h{level}>{_inline(html.escape(heading.group(2)))}</h{level}>")
+            out.append(f"<h{level}>{_inline(escape_text(heading.group(2)))}</h{level}>")
             i += 1
             continue
 
@@ -107,7 +107,7 @@ def md_to_html(md: str) -> str:
             while i < len(lines) and lines[i].startswith("|"):
                 if not _TABLE_SEP_RE.match(lines[i]):
                     cells = [c.strip() for c in lines[i].strip().strip("|").split("|")]
-                    rows.append([_inline(html.escape(c)) for c in cells])
+                    rows.append([_inline(escape_text(c)) for c in cells])
                 i += 1
             if rows:
                 head, *body_rows = rows
@@ -127,7 +127,7 @@ def md_to_html(md: str) -> str:
         if listed:
             flush_para()
             while i < len(lines) and (m := _LIST_RE.match(lines[i])):
-                out.append(f"<li>{_inline(html.escape(m.group(2)))}</li>")
+                out.append(f"<li>{_inline(escape_text(m.group(2)))}</li>")
                 i += 1
             continue
 
@@ -136,7 +136,7 @@ def md_to_html(md: str) -> str:
             i += 1
             continue
 
-        para.append(html.escape(line))
+        para.append(escape_text(line))
         i += 1
 
     flush_para()
@@ -287,7 +287,7 @@ def render_module_html(md: str, *, title: str, asset_prefix: str = "") -> str:
     加载，图只能以源码示人）；根下的页面（diagnostics.html）用默认 ``""``。
     """
     body = md_to_html(md)
-    safe_title = html.escape(title)
+    safe_title = escape_text(title)
     return (
         "<!doctype html>\n"
         '<html lang="zh-CN">\n<head>\n<meta charset="utf-8" />\n'
@@ -361,7 +361,7 @@ def render_index_html(packet: DataPacket) -> str:
     渲染后的 ``modules/<slug>.html``，文件名与落盘页面同源（同一张
     build_slug_map）——点开即读，碰撞路径不会互相覆盖。
     """
-    safe_title = html.escape(packet.meta.title)
+    safe_title = escape_text(packet.meta.title)
     modules = sorted(
         (n for n in packet.nodes if n.type == NodeType.MODULE and n.path),
         key=lambda n: n.path or "",
@@ -382,14 +382,14 @@ def render_index_html(packet: DataPacket) -> str:
         name = layer_names.get(lid, "未分层" if lid == UNLAYERED_LAYER_ID else lid.rsplit("::", 1)[-1])
         color = layer_color(name)
         cards = "\n".join(
-            f'    <a class="mod-card" href="{MODULES_SUBDIR}/{html.escape(slug_map[m.path], quote=True)}.html">'
-            f"<code>{html.escape(m.path or '')}</code></a>"
+            f'    <a class="mod-card" href="{MODULES_SUBDIR}/{escape_attr(slug_map[m.path])}.html">'
+            f"<code>{escape_text(m.path or '')}</code></a>"
             for m in members
         )
         return (
-            f'  <section class="layer-group" id="{html.escape(layer_anchor(lid), quote=True)}">\n'
+            f'  <section class="layer-group" id="{escape_attr(layer_anchor(lid))}">\n'
             f'    <h2 class="layer-head"><span class="dot" style="--c:{color}"></span>'
-            f"{html.escape(name)} <span class=\"count\" data-count=\"{len(members)}\">{len(members)}</span></h2>\n"
+            f"{escape_text(name)} <span class=\"count\" data-count=\"{len(members)}\">{len(members)}</span></h2>\n"
             f'    <div class="grid">\n{cards}\n    </div>\n  </section>'
         )
 
@@ -404,7 +404,7 @@ def render_index_html(packet: DataPacket) -> str:
         f'<span class="chip"><b>{len(packet.edges)}</b> 边</span>{err_chip}'
     )
     layers_meta = "".join(
-        f'<span class="chip" style="--c:{layer_color(layer_names[lid])}">{len(groups[lid])} {html.escape(layer_names.get(lid, lid))}</span>'
+        f'<span class="chip" style="--c:{layer_color(layer_names[lid])}">{len(groups[lid])} {escape_text(layer_names.get(lid, lid))}</span>'
         for lid in ordered_ids
         if lid in layer_names
     )
