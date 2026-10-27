@@ -1,0 +1,100 @@
+name: Release
+
+# 发布由 tag 触发：构建 → **对构建出的 wheel 跑测试** → 上传产物。
+#
+# 为什么测试要跑在"构建出的 wheel"上，而不是源码树：`pip install -e .` 直接指向
+# 源码，打包配置写错（漏 package-data、漏子包、误收子目录）它照样全绿。本项目就
+# 踩过两次 —— wheel 里混进 `codewiki-deploy/` 副本、离线资产不在 wheel 里。
+# 装了 wheel 再跑，才是用户拿到手的那份东西。
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  # 创建 Release 与上传产物需要；其余一律只读
+  contents: write
+
+jobs:
+  release:
+    name: 构建、验证、发布
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+
+      # tag 与 pyproject 的版本必须一致。不一致时的产物是"名叫 v1.2.0、内容是 1.1.0"
+      # 的东西，装上去很难察觉，却让所有 issue/回归都无法复现。
+      #
+      # 判据放在 scripts/check_release_tag.py 而不是内联：内联那段**只有打 tag 才
+      # 执行**，写错了要到发版当天才发现。抽出去之后本地能先跑一遍，平时也有
+      # tests/test_check_release_tag.py 在跑它。
+      - name: 校验 tag 与 package 版本一致
+        run: python scripts/check_release_tag.py --tag "$GITHUB_REF_NAME"
+
+      - name: 构建 wheel 与 sdist
+        run: |
+          python -m pip install build
+          python -m build --wheel --sdist --outdir dist
+          ls -l dist/
+
+      # 与 CI 用的是**同一份**脚本（scripts/verify-wheel.py）——资产、资产哈希、
+      # 未夹带部署副本，外加"wheel 模块清单 == 源码树清单"：最后这条才是漏打包的
+      # 主判据（`pip install -e .` 不会碰 wheel，配置写错它照样能 import）。
+      # 发布这一份是"最后一道"：CI 可能跑在旧提交上。
+      - name: 校验 wheel 内容（模块清单 / 资产 / 未夹带部署副本）
+        run: python scripts/verify-wheel.py dist/*.whl
+
+      - name: 在干净环境安装 wheel
+        run: |
+          python -m venv "$RUNNER_TEMP/release"
+          "$RUNNER_TEMP/release/bin/python" -m pip install dist/*.whl
+          # 硬断言：装好的这份必须来自 site-packages，而不是被源码树顶掉。
+          # 没有这条，下面"跑测试全绿"可能测的是源码树，等于没验打包。
+          "$RUNNER_TEMP/release/bin/python" -c "
+          import codewiki
+          assert 'site-packages' in codewiki.__file__, codewiki.__file__
+          print('import 自:', codewiki.__file__)
+          "
+
+      # 跑测试时把 cwd 切到临时目录，并把 pythonpath 清空 —— pyproject 里配了
+      # `pythonpath = ["."]`，在仓库根跑会把源码树插到已安装的包前面。
+      - name: 对构建出的 wheel 跑测试（主仓有 tests，发布仓没有）
+        if: hashFiles('tests/**') != ''
+        shell: bash
+        run: |
+          "$RUNNER_TEMP/release/bin/python" -m pip install pytest
+          cd "$RUNNER_TEMP"
+          "$RUNNER_TEMP/release/bin/python" -m pytest -p no:randomly \
+            -o pythonpath= -o testpaths= "$GITHUB_WORKSPACE/tests"
+
+      - name: 端到端冲烟（装好的 wheel）
+        shell: bash
+        run: |
+          BIN="$RUNNER_TEMP/release/bin/codewiki"
+          mkdir -p "$RUNNER_TEMP/proj/pkg"
+          printf 'from pkg.b import f\n' > "$RUNNER_TEMP/proj/pkg/a.py"
+          printf 'def f():\n    return 1\n' > "$RUNNER_TEMP/proj/pkg/b.py"
+          printf '[project]\nname = "demo"\n' > "$RUNNER_TEMP/proj/pyproject.toml"
+          "$BIN" analyze --src "$RUNNER_TEMP/proj" --out "$RUNNER_TEMP/out"
+          "$BIN" export --dir "$RUNNER_TEMP/out" --zip "$RUNNER_TEMP/out.zip"
+          test -f "$RUNNER_TEMP/out/index.html"
+          test -f "$RUNNER_TEMP/out/assets/mermaid.min.js"
+          test -f "$RUNNER_TEMP/out.zip"
+
+      - name: 上传构建产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      # 用 gh 而不是第三方 release action：runner 自带 gh，少一个需要审的依赖
+      - name: 创建 GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --title "$GITHUB_REF_NAME" \
+            --notes "详见 [CHANGELOG.md](../blob/main/CHANGELOG.md)。"
