@@ -263,10 +263,10 @@ jobs:
   bench:
     name: 性能基线（非阻塞）
     runs-on: ubuntu-latest
-    # ⚠️ `scripts/bench.py` 是开发工具，不在部署仓白名单里。没有这条 if，
-    # 部署仓的 CI 会跑成 `can't open file scripts/bench.py` —— 一个 job 级的红叉，
-    # 而它跟这次改了什么毫无关系（实测踩过）。
-    if: hashFiles('scripts/bench.py') != ''
+    # ⚠️ 这里**不能**写 `if: hashFiles('scripts/bench.py') != ''`：`hashFiles` 要读
+    # 工作区，而 job 级 `if` 在服务端评估，那一刻还没 checkout —— GitHub 判定整份
+    # 工作流非法（实测：推上去 0 秒失败，工作流名退回文件路径，所有 job 都不跑）。
+    # 所以判断放进步骤内部，见下面的 run 块。
     # 非阻塞：性能受 runner 规格影响，用它做"准入"会变成噪声。它的用途是对照 ——
     # README 写着 10,000 模块全量 64s / 增量 5s，至少让数字每轮落在日志里可查。
     continue-on-error: true
@@ -281,4 +281,11 @@ jobs:
         run: python -m pip install -e '.[dev]'
 
       - name: 合成仓库基准（1,000 模块，比 README 的 10,000 小一档以便 CI 跑完）
-        run: python scripts/bench.py --files 1000 --out "$RUNNER_TEMP/bench"
+        run: |
+          # scripts/bench.py 是开发工具，不在部署仓白名单里 —— 缺了就说一声再退出，
+          # 不要跑成 `can't open file`。理由同上面那条：job 级 if 用不了 hashFiles。
+          if [ ! -f scripts/bench.py ]; then
+            echo "本仓无 scripts/bench.py（开发工具不进交付物），跳过基准"
+            exit 0
+          fi
+          python scripts/bench.py --files 1000 --out "$RUNNER_TEMP/bench"
