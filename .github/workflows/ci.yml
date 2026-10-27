@@ -3,8 +3,15 @@ name: CI
 # 同一份工作流同时服务两个仓：
 #   私有主仓（源码 + tests）→ 跑全量检查
 #   公开发布仓（源码，**不含 tests**）→ 跑不依赖 tests 的那部分
-# 所以凡是用到 tests/ 的步骤都带 `if: hashFiles('tests/**') != ''`。别把这条删掉
-# 改成无条件执行 —— 公开仓会因"找不到 tests"直接红，而那跟代码质量无关。
+# 所以凡是用到 tests/ 或开发脚本（scripts/bench.py、scripts/check_guarantees.py）
+# 的步骤都带 `if: hashFiles(...) != ''`。别把这些条件删掉改成无条件执行 ——
+# 公开仓会因"找不到文件"直接红，而那跟代码质量无关。
+#
+# ⚠️ 现状（别当成"CI 已经替我跑了测试"）：主仓推的是 Gitea，GitHub 上只有部署仓。
+# 也就是说**这些 `if` 守卫在唯一真正跑 CI 的地方全部命中跳过分支** ——
+# pytest、覆盖率门槛、承诺配对、性能基线都不会在 GitHub 上执行。
+# 那几项必须在主仓/本地跑（`.venv/bin/python -m pytest -q`）。日志里会打印
+# "公开仓说明"这一步把跳过的项列出来，就是为了不让人误读成绿色。
 on:
   push:
     branches: [main]
@@ -50,9 +57,23 @@ jobs:
       - name: 语法检查（compileall）
         run: python -m compileall -q codewiki
 
-      # README 的承诺与测试用同一套 id 互相指认；公开仓没有 tests，脚本自己会跳过
+      # README 的承诺与测试用同一套 id 互相指认。**两边都在 tests/ 里**，
+      # 所以公开仓（不发 tests、也不发 check_guarantees.py）必须跳过这个步骤。
+      # 曾经没加这条 if：部署仓的 CI 直接 `can't open file` 红掉 —— 失败原因跟
+      # 代码质量毫无关系，纯属"白名单里没有这个脚本"。
       - name: 承诺 ↔ 测试配对
+        if: hashFiles('tests/**') != ''
         run: python scripts/check_guarantees.py
+
+      # 跳过的步骤要在日志里**说出来**。静默跳过最危险：看日志只见到绿色的
+      # lint，很容易以为"承诺都验过了"。
+      - name: 公开仓说明（无 tests，跳过承诺配对与 pytest）
+        if: hashFiles('tests/**') == ''
+        run: |
+          echo "本仓不含 tests/（发布仓按设计剥离），以下检查在此跳过："
+          echo "  - 承诺 ↔ 测试配对（scripts/check_guarantees.py 随 tests 一起剥离）"
+          echo "  - pytest 与覆盖率门槛"
+          echo "全量测试请在主仓或本地执行：python -m pytest -q"
 
       # 资产是压缩产物、grep 不到版本号，"仓里这份是不是上游那个版本"只能靠哈希对账
       - name: 离线资产哈希
@@ -242,6 +263,10 @@ jobs:
   bench:
     name: 性能基线（非阻塞）
     runs-on: ubuntu-latest
+    # ⚠️ `scripts/bench.py` 是开发工具，不在部署仓白名单里。没有这条 if，
+    # 部署仓的 CI 会跑成 `can't open file scripts/bench.py` —— 一个 job 级的红叉，
+    # 而它跟这次改了什么毫无关系（实测踩过）。
+    if: hashFiles('scripts/bench.py') != ''
     # 非阻塞：性能受 runner 规格影响，用它做"准入"会变成噪声。它的用途是对照 ——
     # README 写着 10,000 模块全量 64s / 增量 5s，至少让数字每轮落在日志里可查。
     continue-on-error: true
