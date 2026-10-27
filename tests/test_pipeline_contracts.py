@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import tomllib
 from pathlib import Path
 
@@ -94,7 +95,10 @@ def _parse_sample(registry, language: str, backend: str):
     assert factory is not None, f"{language}/{backend} 没有注册 —— 黄金文件里有它，默认注册表就应当提供它"
     analyzer = factory()
     if analyzer is None:
-        pytest.skip(f"{language}/{backend} 需要可选依赖（[treesitter] extra），本环境未安装")
+        message = f"{language}/{backend} 需要可选依赖（[treesitter] extra），本环境未安装"
+        if os.environ.get("CODEWIKI_REQUIRE_TREESITTER"):
+            pytest.fail(f"{message}；本环境声明了 [treesitter] extra，黄金用例必须真跑而不是跳过")
+        pytest.skip(message)
     sample = GOLDEN / GOLDEN_SAMPLES[language]
     return analyzer.parse(Path(sample.name), sample.read_text(encoding="utf-8"))
 

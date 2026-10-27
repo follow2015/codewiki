@@ -198,8 +198,19 @@ jobs:
       # `.[dev]`，整个文件被**静默跳过**（CI 只显示 "1 skipped"）。全仓 11 条用例
       # 里，这 11 条此前在任何流水线上都没跑过 —— 只有装了 extra 的这台 runner 能
       # 跑，所以必须在这里跑，否则它是一份"永远绿、永远没验"的摆设。
-      - name: 后端用例（只有这里装了 extra）
-        run: python -m pytest -p no:randomly tests/test_treesitter_analyzers.py
+      #
+      # tests/test_pipeline_contracts.py 里的 TS/Go 黄金摘要有同一个毛病，而且是
+      # 新引入的：黄金比对里 python/{ast,regex} 在哪个 job 都跑，但
+      # {typescript,go}/treesitter 只在装了 extra 的地方有意义 —— 历史上这个 job
+      # 只跑上面那个文件，于是"TS/Go 后端改了输出而 FORMAT_VERSIONS 没动"永远没人
+      # 发现（缓存会一直给旧图谱）。
+      #
+      # CODEWIKI_REQUIRE_TREESITTER=1 把"本该跑却 skip"变成红：这个 job 装了
+      # extra，取不到后端就是配置坏了，不能以 skipped 的名义蒙过。
+      - name: 后端用例 + 后端黄金（只有这里装了 extra）
+        env:
+          CODEWIKI_REQUIRE_TREESITTER: "1"
+        run: python -m pytest -p no:randomly tests/test_treesitter_analyzers.py tests/test_pipeline_contracts.py
 
       - name: 不装 extra 时必须优雅降级（不是崩）
         shell: bash
