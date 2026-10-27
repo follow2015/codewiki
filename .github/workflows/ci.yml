@@ -44,10 +44,14 @@ jobs:
           python -m pip list --format=freeze | sort
 
       - name: Lint（ruff，配置见 pyproject [tool.ruff]）
-        run: ruff check codewiki scripts
+        run: ruff check .
 
-      # 格式检查**暂不启用**：全仓 111 个文件与 ruff format 默认风格不一致，一次性
-      # 重排会把功能 diff 淹没，且剥注释后是否仍合规要单独验。启用步骤见 CONTRIBUTING。
+      # 格式从"暂不启用"改成硬门槛（2026-10-27）：全仓一次性 format 过，源态与
+      # 交付态都已 `--check` 通过（剥注释会吃掉注释前的空行，这一步必须实测，
+      # 不能靠推断）。不加门禁的话，下次谁手写几行就慢慢漂回去，而漂的过程没人
+      # 看得见 —— 与"缺失必须变红"同一个道理。
+      - name: 格式（ruff format --check）
+        run: ruff format --check .
 
       - name: 语法检查（compileall）
         run: python -m compileall -q codewiki
