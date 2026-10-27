@@ -1,17 +1,12 @@
 name: CI
 
-# 同一份工作流同时服务两个仓：
-#   私有主仓（源码 + tests）→ 跑全量检查
-#   公开发布仓（源码，**不含 tests**）→ 跑不依赖 tests 的那部分
-# 所以凡是用到 tests/ 或开发脚本（scripts/bench.py、scripts/check_guarantees.py）
-# 的步骤都带 `if: hashFiles(...) != ''`。别把这些条件删掉改成无条件执行 ——
-# 公开仓会因"找不到文件"直接红，而那跟代码质量无关。
+# 同一份工作流同时服务两个仓，**两个仓现在都带 tests**（口径见 sync-to-deploy.sh
+# 的白名单注释）：主仓推 Gitea，GitHub 上是公开发布仓，两者的检查项一致。
 #
-# ⚠️ 现状（别当成"CI 已经替我跑了测试"）：主仓推的是 Gitea，GitHub 上只有部署仓。
-# 也就是说**这些 `if` 守卫在唯一真正跑 CI 的地方全部命中跳过分支** ——
-# pytest、覆盖率门槛、承诺配对、性能基线都不会在 GitHub 上执行。
-# 那几项必须在主仓/本地跑（`.venv/bin/python -m pytest -q`）。日志里会打印
-# "公开仓说明"这一步把跳过的项列出来，就是为了不让人误读成绿色。
+# ⚠️ 这里刻意**不再**用 `if: hashFiles('tests/**') != ''` 之类的守卫。以前用它
+# 兼容"公开仓没有 tests"，代价是：一旦同步漏发 tests/，pytest 与承诺配对会
+# 静默跳过，而 lint 仍然绿 —— 看起来全绿，实际什么都没验。现在改成无条件执行，
+# 漏发就会以 "file or directory not found" 红掉。**缺失必须变红，不能变绿。**
 on:
   push:
     branches: [main]
@@ -57,23 +52,9 @@ jobs:
       - name: 语法检查（compileall）
         run: python -m compileall -q codewiki
 
-      # README 的承诺与测试用同一套 id 互相指认。**两边都在 tests/ 里**，
-      # 所以公开仓（不发 tests、也不发 check_guarantees.py）必须跳过这个步骤。
-      # 曾经没加这条 if：部署仓的 CI 直接 `can't open file` 红掉 —— 失败原因跟
-      # 代码质量毫无关系，纯属"白名单里没有这个脚本"。
+      # README 的承诺与测试用同一套 id 互相指认，两边都在 tools 里，两个仓都有
       - name: 承诺 ↔ 测试配对
-        if: hashFiles('tests/**') != ''
         run: python scripts/check_guarantees.py
-
-      # 跳过的步骤要在日志里**说出来**。静默跳过最危险：看日志只见到绿色的
-      # lint，很容易以为"承诺都验过了"。
-      - name: 公开仓说明（无 tests，跳过承诺配对与 pytest）
-        if: hashFiles('tests/**') == ''
-        run: |
-          echo "本仓不含 tests/（发布仓按设计剥离），以下检查在此跳过："
-          echo "  - 承诺 ↔ 测试配对（scripts/check_guarantees.py 随 tests 一起剥离）"
-          echo "  - pytest 与覆盖率门槛"
-          echo "全量测试请在主仓或本地执行：python -m pytest -q"
 
       # 资产是压缩产物、grep 不到版本号，"仓里这份是不是上游那个版本"只能靠哈希对账
       - name: 离线资产哈希
@@ -131,13 +112,11 @@ jobs:
           codewiki cycles --input "$RUNNER_TEMP/out/data/codewiki.json" > /dev/null
 
       - name: pytest
-        if: hashFiles('tests/**') != ''
         run: python -m pytest -p no:randomly
 
       # 覆盖率只给安全边界设门槛：它是"越权面是否真被堵死"的最后一道网，值得数字
       # 约束。其它包不设目标 —— 为凑指标写无用测试比没覆盖率更糟。
       - name: 覆盖率门槛（ai/guard ≥ 90%）
-        if: hashFiles('tests/**') != ''
         run: |
           python -m pytest -p no:randomly tests/ \
             --cov=codewiki.ai.guard --cov-report=term-missing --cov-fail-under=90
@@ -160,19 +139,11 @@ jobs:
           python -m pip install build
           python -m build --wheel --sdist --outdir dist
 
+      # 校验逻辑在 scripts/verify-wheel.py 里（可本地跑、有单测），CI 只负责调用。
+      # 它比对 wheel 的 namelist 与源码树清单 —— 这是唯一能拦住"子包静默漏掉"的判据，
+      # 因为 `pip install -e .` 根本不读 wheel。
       - name: 校验 wheel 内容
-        run: |
-          python -c "
-          import glob, zipfile
-          whl = glob.glob('dist/*.whl')
-          assert whl, '没有产出 wheel'
-          names = zipfile.ZipFile(whl[0]).namelist()
-          assert any(n.endswith('assets/mermaid.min.js') for n in names), 'wheel 里缺离线资产'
-          assert any(n.endswith('assets/mermaid.min.js.sha256') for n in names), 'wheel 里缺资产哈希'
-          leaked = [n for n in names if 'deploy' in n]
-          assert not leaked, f'wheel 里混进了部署副本: {leaked[:3]}'
-          print(f'wheel 条目 {len(names)}，资产与哈希都在')
-          "
+        run: python scripts/verify-wheel.py dist/*.whl
 
       - name: 在干净环境安装 wheel 并冲烟
         shell: bash

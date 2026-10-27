@@ -87,6 +87,14 @@ _BENIGN_NAME = re.compile(
 
 _BARE_IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z_.]*")
 
+_EXPRESSION = re.compile(
+    r"[A-Za-z_][A-Za-z0-9_]*"
+    r"(?:\.[A-Za-z_][A-Za-z0-9_]*|\[[^\]]*\]|\([^)]*\))+"
+    r"""[,;:)\]}>"']*"""
+)
+
+_TRAILING_PUNCT = re.compile(r"""[,;:)\]}>"']+$""")
+
 _SHAPE_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     (
         re.compile(r"-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----.*?-----END [A-Z0-9 ]*PRIVATE KEY-----", re.S),
@@ -118,6 +126,13 @@ _COLON = re.compile(
     re.I,
 )
 
+_ANNOTATED_ASSIGN = re.compile(
+    rf"\b([A-Za-z0-9_.\-]*?(?:{_KEYWORD})[A-Za-z0-9_.\-]*)"
+    r"(\s*:\s*[^=\n]{1,80}?\s*=\s*)"
+    r"(\"[^\"]*\"|'[^']*'|[^\s#]+)",
+    re.I,
+)
+
 
 def _mask_all(match: re.Match[str]) -> str:
     """audit 档：名字与分隔符保留，值一律抹掉。"""
@@ -127,11 +142,19 @@ def _mask_all(match: re.Match[str]) -> str:
 def _mask_literal_only(match: re.Match[str]) -> str:
     """model 档：只抹**看起来是字面量密钥**的值。
 
-    - 带引号的非空字面量：抹；
-    - ``NAME=value``（全大写名 + 无空格，dotenv / shell 风格）：抹；
-    - 调用 / 表达式（含括号）、裸标识符（``self.token = token``）、短纯数字
-      （``token_count = 0``）：这是代码不是密钥，原样保留；
-    - 其余（含数字或符号的裸值，如 ``password`` 取 ``hunter2``）：抹。
+    判据按"像代码"逐条放行，最后兜底才抹 —— 顺序本身是契约，别重排：
+
+    1. 带引号的非空字面量：抹；
+    2. 容器/调用起始 ``(`` ``[`` ``{``：保留（``token: dict[str, str] = {}`` 这类
+       新规则带出来的误伤面，不拦会抹成 ``= ***``）；
+    3. 含括号：调用或分组，保留；
+    4. 取值表达式 ``os.environ['K']`` / ``self.cfg.token``：保留；
+    5. ``NAME=value``（全大写名）：抹 —— dotenv 惯例，值再普通也是凭据位；
+    6. 裸标识符（``self.token = token``）、短纯数字（``token_count = 0``）：保留；
+    7. 其余（含数字或符号的裸值，如 ``password`` 取 ``hunter2``）：抹。
+
+    判定一律针对 ``core``（剥掉尾标点后的值），输出时把 ``tail`` 原样拼回 ——
+    抹掉 ``None`` 却把逗号吃掉会让整行语法坏掉。
     """
     name, sep, value = match.group(1), match.group(2), match.group(3)
     original = match.group(0)
@@ -139,19 +162,28 @@ def _mask_literal_only(match: re.Match[str]) -> str:
         return original
     if value[:1] in ("'", '"'):
         return f"{name}{sep}***" if len(value) > 2 else original
-    if "(" in value or ")" in value:
+    if _EXPRESSION.fullmatch(value):
+        return original
+    core = _TRAILING_PUNCT.sub("", value)
+    tail = value[len(core) :]
+    if core[:1] in ("(", "[", "{"):
+        return original
+    if "(" in core or ")" in core:
+        return original
+    if _EXPRESSION.fullmatch(core):
         return original
     if sep.strip() == "=" and name.isupper():
-        return f"{name}{sep}***"
-    if _BARE_IDENTIFIER.fullmatch(value) or (value.isdigit() and len(value) < 6):
+        return f"{name}{sep}***{tail}"
+    if _BARE_IDENTIFIER.fullmatch(core) or (core.isdigit() and len(core) < 6):
         return original
-    return f"{name}{sep}***"
+    return f"{name}{sep}***{tail}"
 
 
 def _apply(text: str, repl_keyword) -> str:
     out = text
     for pattern, repl in _SHAPE_PATTERNS:
         out = pattern.sub(repl, out)
+    out = _ANNOTATED_ASSIGN.sub(repl_keyword, out)
     out = _ASSIGN.sub(repl_keyword, out)
     return _COLON.sub(repl_keyword, out)
 

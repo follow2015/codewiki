@@ -1,0 +1,523 @@
+{
+  "$defs": {
+    "Annotation": {
+      "description": "人工或 AI 的富文本注解（§3.1 的 annotations 段）。",
+      "properties": {
+        "label": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Label"
+        },
+        "note": {
+          "title": "Note",
+          "type": "string"
+        },
+        "reviewed": {
+          "default": false,
+          "title": "Reviewed",
+          "type": "boolean"
+        },
+        "source": {
+          "default": "human",
+          "description": "human | ai",
+          "title": "Source",
+          "type": "string"
+        },
+        "target": {
+          "title": "Target",
+          "type": "string"
+        }
+      },
+      "required": [
+        "target",
+        "note"
+      ],
+      "title": "Annotation",
+      "type": "object"
+    },
+    "Diagnostic": {
+      "description": "一条诊断（解析告警 / 环 / 未分层 / God Node 都走这里）。",
+      "properties": {
+        "code": {
+          "description": "稳定的诊断码，如 LAYER_CYCLE",
+          "title": "Code",
+          "type": "string"
+        },
+        "level": {
+          "description": "error | warning | info",
+          "title": "Level",
+          "type": "string"
+        },
+        "message": {
+          "title": "Message",
+          "type": "string"
+        },
+        "where": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "文件:行 或 节点 id",
+          "title": "Where"
+        }
+      },
+      "required": [
+        "level",
+        "code",
+        "message"
+      ],
+      "title": "Diagnostic",
+      "type": "object"
+    },
+    "Edge": {
+      "description": "图谱边（§2.2 关键属性的并集）。",
+      "properties": {
+        "alias": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Alias"
+        },
+        "confidence": {
+          "default": 1.0,
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Confidence",
+          "type": "number"
+        },
+        "evidence": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Evidence"
+        },
+        "source": {
+          "title": "Source",
+          "type": "string"
+        },
+        "static": {
+          "default": true,
+          "title": "Static",
+          "type": "boolean"
+        },
+        "target": {
+          "title": "Target",
+          "type": "string"
+        },
+        "type": {
+          "$ref": "#/$defs/EdgeType"
+        },
+        "weight": {
+          "default": 1,
+          "title": "Weight",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "source",
+        "target",
+        "type"
+      ],
+      "title": "Edge",
+      "type": "object"
+    },
+    "EdgeType": {
+      "description": "边类型（§2.2）。",
+      "enum": [
+        "CONTAINS",
+        "IMPORTS",
+        "CALLS",
+        "INHERITS",
+        "LAYER_DEPENDS",
+        "USES_DYNAMIC"
+      ],
+      "title": "EdgeType",
+      "type": "string"
+    },
+    "LayerNode": {
+      "description": "架构层（来自 ``codewiki.toml`` 的 architecture.layers）。",
+      "properties": {
+        "color": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Color"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "order": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Order"
+        }
+      },
+      "required": [
+        "id",
+        "name"
+      ],
+      "title": "LayerNode",
+      "type": "object"
+    },
+    "Meta": {
+      "description": "数据包元信息。",
+      "properties": {
+        "generated_at": {
+          "title": "Generated At",
+          "type": "string"
+        },
+        "provenance": {
+          "additionalProperties": {
+            "$ref": "#/$defs/Provenance"
+          },
+          "title": "Provenance",
+          "type": "object"
+        },
+        "repo_commit": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Repo Commit"
+        },
+        "repo_root": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Repo Root"
+        },
+        "schema_version": {
+          "default": 1,
+          "title": "Schema Version",
+          "type": "integer"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        },
+        "tool_version": {
+          "default": "1.0.0",
+          "title": "Tool Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "title",
+        "generated_at"
+      ],
+      "title": "Meta",
+      "type": "object"
+    },
+    "Node": {
+      "description": "图谱节点（§2.1 必备属性的并集；各类型只用其中一部分）。",
+      "properties": {
+        "color": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Color"
+        },
+        "docstring": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Docstring"
+        },
+        "hash": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Hash"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Kind"
+        },
+        "language": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Language"
+        },
+        "layer_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Layer Id"
+        },
+        "line_end": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Line End"
+        },
+        "line_start": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Line Start"
+        },
+        "module_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Module Id"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Name"
+        },
+        "order": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Order"
+        },
+        "path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Path"
+        },
+        "signature": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Signature"
+        },
+        "type": {
+          "$ref": "#/$defs/NodeType"
+        }
+      },
+      "required": [
+        "id",
+        "type"
+      ],
+      "title": "Node",
+      "type": "object"
+    },
+    "NodeType": {
+      "description": "节点类型（§2.1）。",
+      "enum": [
+        "Layer",
+        "Package",
+        "Module",
+        "Symbol",
+        "External"
+      ],
+      "title": "NodeType",
+      "type": "string"
+    },
+    "Provenance": {
+      "description": "事实来源（§4.6.2）：哪个后端、什么版本产出的这条事实。\n\n一期即预留（阶段三引入 SCIP 时不必改 schema）。",
+      "properties": {
+        "backend": {
+          "title": "Backend",
+          "type": "string"
+        },
+        "version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Version"
+        }
+      },
+      "required": [
+        "backend"
+      ],
+      "title": "Provenance",
+      "type": "object"
+    }
+  },
+  "description": "标准数据包：六段（§4.4）。",
+  "properties": {
+    "annotations": {
+      "items": {
+        "$ref": "#/$defs/Annotation"
+      },
+      "title": "Annotations",
+      "type": "array"
+    },
+    "diagnostics": {
+      "items": {
+        "$ref": "#/$defs/Diagnostic"
+      },
+      "title": "Diagnostics",
+      "type": "array"
+    },
+    "edges": {
+      "items": {
+        "$ref": "#/$defs/Edge"
+      },
+      "title": "Edges",
+      "type": "array"
+    },
+    "layers": {
+      "items": {
+        "$ref": "#/$defs/LayerNode"
+      },
+      "title": "Layers",
+      "type": "array"
+    },
+    "meta": {
+      "$ref": "#/$defs/Meta"
+    },
+    "nodes": {
+      "items": {
+        "$ref": "#/$defs/Node"
+      },
+      "title": "Nodes",
+      "type": "array"
+    }
+  },
+  "required": [
+    "meta"
+  ],
+  "title": "DataPacket",
+  "type": "object"
+}

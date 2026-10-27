@@ -74,6 +74,17 @@ extend-exclude = ["tests/fixtures", "tests/golden"]
 select = ["E", "F", "I", "UP", "B", "SIM", "TID"]
 ignore = ["E501"]
 
+# 显式声明 first-party，不靠 `src = ["."]` 的自动探测：
+# 交付仓的代码是剥过注释的，源态绿 ≠ 交付态绿。自动探测在某些目录布局下会把
+# `codewiki` 判成第三方，于是 `import pytest` 与 `from codewiki...` 被合并成
+# 同一组、要求按字母序重排 —— 源态绿、交付态 I001（实测踩过）。
+[tool.ruff.lint.isort]
+# `tests` 也必须列进来：它是 conftest / 夹具的来源，测试里大量
+# `from tests.conftest import ...`。只声明 codewiki 会把它挤进第三方组，
+# 于是同一函数里的 `from tests...` 与 `from codewiki...` 被要求加空行分组 ——
+# 主仓源态不报、交付态报（strip 掉分隔注释后两组并拢）。
+known-first-party = ["codewiki", "tests"]
+
 # 子进程只有一个入口（codewiki/subproc.py）：shell=False、最小环境、超时即杀
 # 这三件事写在调用点上，下一个新增的调用点就会重犯同样的错（历史上正是
 # ``python -m`` 继承 cwd 让被分析仓库的 json.py 被执行）。用 lint 把这条约束

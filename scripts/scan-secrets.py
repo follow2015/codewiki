@@ -75,6 +75,8 @@ RULES: list[tuple[str, re.Pattern, str]] = [
 
 _VALUE_TAIL = re.compile(r"['\"]([^'\"]*)['\"]\s*$")
 
+_SOURCE_TAIL = re.compile(r"""(?:\\[nrt])*["')\]},;]*$""")
+
 _PLACEHOLDER_VALUE = re.compile(
     r"^(?:<.*|\$\{.*|\$\(.*|\{.*|os\..*|getenv.*|environ.*|None|null|\*+|x+|\.+)$",
     re.IGNORECASE,
@@ -128,6 +130,18 @@ def is_private_ip(ip: str) -> bool:
 
 SAFE_PATH_PREFIXES = (".example", "README", "docs/")
 
+FIXTURE_MARKER = "scan-secrets: fixtures-allowed"
+_MARKER_HEAD_LINES = 40
+
+
+def _has_fixture_marker(text: str) -> bool:
+    """标记必须出现在文件头 40 行内 —— 允许写在文件中间就等于允许事后补标记。"""
+    return any(FIXTURE_MARKER in line for line in text.splitlines()[:_MARKER_HEAD_LINES])
+
+
+def _in_tests_tree(path: Path) -> bool:
+    return "tests" in Path(path).parts
+
 
 def scan_file(path: Path, text: str | None = None) -> list[tuple[int, str, str, str]]:
     """扫描单个文件，返回 [(行号, 规则ID, 匹配内容, 描述)] 列表。"""
@@ -140,6 +154,9 @@ def scan_file(path: Path, text: str | None = None) -> list[tuple[int, str, str, 
             return findings
 
     if "\x00" in text[:8192]:
+        return findings
+
+    if _has_fixture_marker(text) and _in_tests_tree(path):
         return findings
 
     full = str(path).replace("\\", "/")
@@ -171,6 +188,9 @@ def scan_file(path: Path, text: str | None = None) -> list[tuple[int, str, str, 
                     value = tail.group(1).strip() if tail else ""
                     bare = (m.group(3) or "").strip().rstrip(",")
                     if bare and m.group(2) is None:
+                        bare = _SOURCE_TAIL.sub("", bare)
+                        if not bare:
+                            continue
                         if _PLACEHOLDER_VALUE.match(bare) or re.fullmatch(r"[A-Z][A-Z0-9_]*", bare):
                             continue
                         if bare == m.group(1):
@@ -204,16 +224,43 @@ def main() -> int:
         return 2
 
     all_findings: list[tuple[str, int, str, str, str]] = []
+    skipped: list[str] = []
+    misused: list[str] = []
     for arg in sys.argv[1:]:
         path = Path(arg)
-        if not path.exists():
+        if not path.exists() or path.is_dir():
             continue
-        for lineno, rule_id, matched, desc in scan_file(path):
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except (OSError, UnicodeDecodeError):
+            continue
+        if _has_fixture_marker(text):
+            if _in_tests_tree(path):
+                skipped.append(arg)
+                continue
+            misused.append(arg)
+        for lineno, rule_id, matched, desc in scan_file(path, text):
             all_findings.append((arg, lineno, rule_id, matched, desc))
+
+    if skipped:
+        print(
+            f"ℹ️  {len(skipped)} 个测试夹具文件按标记跳过（含故意写出的假密钥，用途是验证扫描器本身）：",
+            file=sys.stderr,
+        )
+        for s in skipped:
+            print(f"     - {s}", file=sys.stderr)
+
+    if misused:
+        print(
+            "❌ 以下文件在 tests/ 之外使用了 fixture 豁免标记 —— 不生效，已按普通文件扫描：",
+            file=sys.stderr,
+        )
+        for s in misused:
+            print(f"     - {s}", file=sys.stderr)
 
     if not all_findings:
         print("✅ 未发现机密")
-        return 0
+        return 1 if misused else 0
 
     print(f"❌ 发现 {len(all_findings)} 处疑似机密：\n", file=sys.stderr)
     for path, lineno, rule_id, matched, desc in all_findings:
