@@ -4,6 +4,7 @@
 环给出环上节点、God Node 给出出入度与跨层占比、diff 给出改动节点与影响半径。
 只给"你可能有问题"而不给依据的诊断，等于把排查成本丢给读者。
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field

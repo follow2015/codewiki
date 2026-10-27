@@ -8,6 +8,7 @@
 
 ``provenance`` 一期即预留（阶段三引入 SCIP 时不必动 schema）。
 """
+
 from __future__ import annotations
 
 from pydantic import BaseModel, Field

@@ -17,6 +17,7 @@
 本模块只提供出口，不做"再转义一次"的补偿 —— 那是调用点顺序的问题，见
 ``site.md_to_html`` 的 docstring。
 """
+
 from __future__ import annotations
 
 import html

@@ -10,6 +10,7 @@
 
 scan-secrets: fixtures-allowed —— 本文件含故意写出的假密钥样本，用途是验证扫描器与脱敏。
 """
+
 from __future__ import annotations
 
 import json
@@ -123,5 +124,7 @@ def test_probe_reports_failure_reason():
 
 
 def test_probe_reports_success():
-    ok, message = probe_connectivity(_client(transport=lambda _p: {"choices": [{"message": {"content": "pong"}}]}))
+    ok, message = probe_connectivity(
+        _client(transport=lambda _p: {"choices": [{"message": {"content": "pong"}}]})
+    )
     assert ok is True and "可达" in message

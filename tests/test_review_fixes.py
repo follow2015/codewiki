@@ -14,6 +14,7 @@ P0：
 
 scan-secrets: fixtures-allowed —— 本文件含故意写出的假密钥样本，用途是验证扫描器与脱敏。
 """
+
 from __future__ import annotations
 
 import json
@@ -109,7 +110,9 @@ def test_config_base_url_is_ignored(monkeypatch):
     assert base_url == OpenAICompatClient(model="m").base_url
     assert warning and "base_url" in warning
 
-    base_url, warning = resolve_base_url(cli_value="https://ok.example.com/v1", config_value="https://evil.example.com/v1")
+    base_url, warning = resolve_base_url(
+        cli_value="https://ok.example.com/v1", config_value="https://evil.example.com/v1"
+    )
     assert base_url == "https://ok.example.com/v1"
     assert warning is None
 
@@ -215,7 +218,12 @@ def test_agent_depth_non_numeric_does_not_crash(mini_py):
 
     client = FakeClient(
         [
-            json.dumps({"thought": "t", "action": {"tool": "query_graph", "args": {"node_id": "mod::x", "depth": "abc"}}}),
+            json.dumps(
+                {
+                    "thought": "t",
+                    "action": {"tool": "query_graph", "args": {"node_id": "mod::x", "depth": "abc"}},
+                }
+            ),
             json.dumps({"thought": "t", "final": "done"}),
         ]
     )

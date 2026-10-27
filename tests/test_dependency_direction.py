@@ -8,6 +8,7 @@
 等于**当前**的依赖图，新增一条越级依赖即失败；要放宽必须改这张表并在提交信息里
 说明理由。
 """
+
 from __future__ import annotations
 
 import ast
@@ -133,8 +134,7 @@ def test_ai_layer_does_not_reach_into_cli():
     offenders = [
         f"{path}: {module}"
         for path, source, target, module in _collect()
-        if source in {"ai", "guard", "render", "graph", "analyzers", "pipeline", "core"}
-        and target == "cli"
+        if source in {"ai", "guard", "render", "graph", "analyzers", "pipeline", "core"} and target == "cli"
     ]
     assert not offenders, "低层反向依赖 cli：\n" + "\n".join(offenders)
 
@@ -147,10 +147,12 @@ def test_graph_does_not_depend_on_render():
     "依赖在不在"，放宽白名单也绕不过去。
     """
     offenders = [
-        f"{path}: {module}" for path, source, target, module in _collect() if source == "graph" and target == "render"
+        f"{path}: {module}"
+        for path, source, target, module in _collect()
+        if source == "graph" and target == "render"
     ]
-    assert not offenders, (
-        "graph 又依赖 render 了（环会复活，渲染层改动会牵连导入层）：\n" + "\n".join(offenders)
+    assert not offenders, "graph 又依赖 render 了（环会复活，渲染层改动会牵连导入层）：\n" + "\n".join(
+        offenders
     )
 
 

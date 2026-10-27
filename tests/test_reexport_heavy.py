@@ -9,6 +9,7 @@
 4. **成环**：``cyc/__init__ ← cyc/x ← cyc/__init__`` ⇒ 不许死循环、不许崩，
    且要留下可观测的诊断（或降级为模块级边），**绝不猜测**。
 """
+
 from __future__ import annotations
 
 from codewiki.graph import build_graph

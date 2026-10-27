@@ -8,6 +8,7 @@
 3. **校验门中断**：静态图坏 ⇒ 一张都不落盘（§4.3：坏图绝不产出 .mmd）；
 4. **置信度过滤**：低于阈值的边不进图。
 """
+
 from __future__ import annotations
 
 from codewiki.graph import build_graph
@@ -106,9 +107,7 @@ def test_invalid_static_diagram_aborts_without_writing_files(mini_py, tmp_path, 
     """静态图坏 = 工具缺陷 ⇒ 中断整轮，一张 .mmd 都不落盘（§4.3）。"""
     import codewiki.render.diagrams as diagrams
 
-    monkeypatch.setattr(
-        diagrams, "render_system_context", lambda *a, **k: 'flowchart TD\n  A["未闭合\n'
-    )
+    monkeypatch.setattr(diagrams, "render_system_context", lambda *a, **k: 'flowchart TD\n  A["未闭合\n')
     result = render_all(_packet(mini_py), tmp_path)
 
     assert any(d.level == "error" and d.code == "DIAGRAM_INVALID" for d in result.diagnostics)
@@ -160,6 +159,7 @@ def test_cross_layer_module_imports_are_not_drawn_in_system_context():
     assert f"{node_id(a1)} --> {node_id(s1)}" not in text, "跨层模块边重复表达，必须由聚合边代替"
     assert f"{node_id('layer::A')} -->|3| {node_id('layer::B')}" in text, "层间聚合边（带次数）必须在"
 
+
 def test_unlayered_modules_appear_in_system_context():
     """没归类的模块必须在图上出现 —— 不能"层没配到就当它不存在"。
 
@@ -188,6 +188,7 @@ def test_unlayered_modules_appear_in_system_context():
 
     assert UNLAYERED_LABEL in text, "要有未分层兜底组"
     assert f'{node_id(loose)}["loose.py"]' in text, "未分层模块必须出现在图上"
+
 
 def test_slug_strips_attribute_breaking_characters():
     """slug 同时是页面名与 href 片段，不能带引号/尖括号（第一道防线）。

@@ -12,6 +12,7 @@
    实现相同，但契约不同（文本语境 vs 属性语境），这里钉住"都不能漏引号"；
 3. ``render/escape.py`` 不得反向依赖渲染层（保持它是叶子，谁都能用）。
 """
+
 from __future__ import annotations
 
 import ast
@@ -59,8 +60,8 @@ def test_html_escaping_has_exactly_one_exit() -> None:
     offenders: list[str] = []
     for path in _package_sources():
         offenders.extend(_offences(path))
-    assert offenders == [], (
-        "HTML 转义只能经过 codewiki.render.escape，发现绕过：\n  " + "\n  ".join(offenders)
+    assert offenders == [], "HTML 转义只能经过 codewiki.render.escape，发现绕过：\n  " + "\n  ".join(
+        offenders
     )
 
 
@@ -83,5 +84,7 @@ def test_escape_module_stays_a_leaf() -> None:
             imported.append(node.module)
         elif isinstance(node, ast.Import):
             imported.extend(alias.name for alias in node.names)
-    forbidden = [m for m in imported if m.startswith("codewiki.") and not m.startswith("codewiki.render.escape")]
+    forbidden = [
+        m for m in imported if m.startswith("codewiki.") and not m.startswith("codewiki.render.escape")
+    ]
     assert forbidden == [], f"render/escape.py 不该依赖 {forbidden}"

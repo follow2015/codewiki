@@ -7,6 +7,7 @@
   Python 3.14 的 PEP 649 延迟注解对本后端无影响（与 9.1 的回归要求一致）。
 - **不做跨文件解析**：只产出本文件可见的事实，消歧交给 ``graph/builder.py``。
 """
+
 from __future__ import annotations
 
 import ast
@@ -134,9 +135,7 @@ class PythonAstAnalyzer:
         for node in tree.body:
             if isinstance(node, ast.Import):
                 for alias in node.names:
-                    imports.append(
-                        ImportFact(module=alias.name, alias=alias.asname, lineno=node.lineno)
-                    )
+                    imports.append(ImportFact(module=alias.name, alias=alias.asname, lineno=node.lineno))
             elif isinstance(node, ast.ImportFrom):
                 for alias in node.names:
                     is_star = alias.name == "*"

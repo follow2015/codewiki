@@ -9,6 +9,7 @@
 2. 校验错误必须带**文件行列号 + 修复建议**（否则用户面对一个"字段无效"无从下手）；
 3. 导出 JSON Schema 供编辑器补全。
 """
+
 from __future__ import annotations
 
 import json
@@ -28,8 +29,8 @@ SCHEMA_EXPORT_NAME = "codewiki.schema.json"
 
 class ProjectSection(BaseModel):
     """产物语言与展示文案相关（不影响解析逻辑）。"""
-    model_config = _EXTRA_FORBID
 
+    model_config = _EXTRA_FORBID
 
     name: str | None = None
     lang: str = "zh"
@@ -37,8 +38,8 @@ class ProjectSection(BaseModel):
 
 class LanguageSpec(BaseModel):
     """一个语言的解析配置。"""
-    model_config = _EXTRA_FORBID
 
+    model_config = _EXTRA_FORBID
 
     ext: list[str] = Field(default_factory=list)
     analyzer: str = "auto"
@@ -46,8 +47,8 @@ class LanguageSpec(BaseModel):
 
 class AnalysisSection(BaseModel):
     """分析行为（§3.1：置信度下限、单图节点上限）。"""
-    model_config = _EXTRA_FORBID
 
+    model_config = _EXTRA_FORBID
 
     min_confidence: float = Field(default=0.5, ge=0.0, le=1.0)
     max_nodes: int = Field(default=300, gt=0)
@@ -58,8 +59,8 @@ class AnalysisSection(BaseModel):
 
 class LayerSpec(BaseModel):
     """一个架构层（§3.1 的 architecture.layers 元素）。"""
-    model_config = _EXTRA_FORBID
 
+    model_config = _EXTRA_FORBID
 
     name: str
     paths: list[str] = Field(default_factory=list)
@@ -79,8 +80,8 @@ class AnnotationSpec(BaseModel):
     记这两个字段，下次读配置时就会被当成"人工写且已审阅"，等于把 §十二 的防线
     （AI 注解默认未审阅）悄悄拆掉。
     """
-    model_config = _EXTRA_FORBID
 
+    model_config = _EXTRA_FORBID
 
     target: str
     label: str | None = None
@@ -91,8 +92,8 @@ class AnnotationSpec(BaseModel):
 
 class AiSection(BaseModel):
     """AI 增强（整段缺失等同关闭，§3.1；阶段二新增字段一律有默认值）。"""
-    model_config = _EXTRA_FORBID
 
+    model_config = _EXTRA_FORBID
 
     enabled: bool = False
     base_url: str | None = None
@@ -108,8 +109,8 @@ class AiSection(BaseModel):
 
 class CodewikiConfig(BaseModel):
     """``codewiki.toml`` 的完整模型。"""
-    model_config = _EXTRA_FORBID
 
+    model_config = _EXTRA_FORBID
 
     project: ProjectSection = Field(default_factory=ProjectSection)
     languages: dict[str, LanguageSpec] = Field(default_factory=dict)
@@ -129,7 +130,7 @@ class CodewikiConfig(BaseModel):
     def layers_as_nodes(self) -> list[dict]:
         """层 → 数据包里的 layers 段（按 order 排序，无 order 时按声明顺序）。"""
         ordered = sorted(
-            self.architecture.layers, key=lambda layer: (layer.order if layer.order is not None else 10_000)
+            self.architecture.layers, key=lambda layer: layer.order if layer.order is not None else 10_000
         )
         return [
             {"id": layer.id, "name": layer.name, "color": layer.color, "order": index}
@@ -139,8 +140,8 @@ class CodewikiConfig(BaseModel):
 
 class ArchitectureSection(BaseModel):
     """架构分层定义（§3.1 的 architecture）。"""
-    model_config = _EXTRA_FORBID
 
+    model_config = _EXTRA_FORBID
 
     layers: list[LayerSpec] = Field(default_factory=list)
 
@@ -151,7 +152,9 @@ CodewikiConfig.model_rebuild()
 class ConfigError(Exception):
     """配置加载失败（带文件位置与修复建议）。"""
 
-    def __init__(self, message: str, *, path: str | None = None, line: int | None = None, hint: str | None = None) -> None:
+    def __init__(
+        self, message: str, *, path: str | None = None, line: int | None = None, hint: str | None = None
+    ) -> None:
         self.path = path
         self.line = line
         self.hint = hint

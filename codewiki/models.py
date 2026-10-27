@@ -8,6 +8,7 @@
 - 修改字段类型/枚举值必须同步 `schemas.py` 的 `DataPacket` 与
   `tests/golden/packet_schema.json` 快照（那条用例会当场红）。
 """
+
 from __future__ import annotations
 
 from enum import StrEnum
@@ -101,8 +102,8 @@ class Node(BaseModel):
 
 class Edge(BaseModel):
     """图谱边（§2.2 关键属性的并集）。"""
-    model_config = _EXTRA_FORBID
 
+    model_config = _EXTRA_FORBID
 
     source: str
     target: str
@@ -121,8 +122,8 @@ class ImportFact(BaseModel):
     ``name`` 用于 ``from`` 导入的具体名字；``is_star`` 标记 ``from x import *``。
     TS/JS 的 re-export 形态（``export {x} from``）由语言后端映射到本模型。
     """
-    model_config = _EXTRA_FORBID
 
+    model_config = _EXTRA_FORBID
 
     module: str | None = None
     name: str | None = None
@@ -134,8 +135,8 @@ class ImportFact(BaseModel):
 
 class SymbolFact(BaseModel):
     """一个符号的定义事实（类/函数/方法/常量）。"""
-    model_config = _EXTRA_FORBID
 
+    model_config = _EXTRA_FORBID
 
     name: str
     qualname: str
@@ -150,8 +151,8 @@ class SymbolFact(BaseModel):
 
 class CallFact(BaseModel):
     """一处调用（语法上的名字，不在此处做跨文件消歧）。"""
-    model_config = _EXTRA_FORBID
 
+    model_config = _EXTRA_FORBID
 
     callee: str
     receiver: str | None = None
@@ -161,8 +162,8 @@ class CallFact(BaseModel):
 
 class InheritanceFact(BaseModel):
     """一条继承关系（基类名字同样留到引擎层消歧）。"""
-    model_config = _EXTRA_FORBID
 
+    model_config = _EXTRA_FORBID
 
     child: str
     base: str
@@ -175,8 +176,8 @@ class DynamicFact(BaseModel):
     ``__import__("pkg.mod")``）。``getattr(obj, name)`` 这类目标不可知的一律
     不收 —— 收了就是编造依赖。
     """
-    model_config = _EXTRA_FORBID
 
+    model_config = _EXTRA_FORBID
 
     target: str
     lineno: int
@@ -189,8 +190,8 @@ class FileModel(BaseModel):
     约束（§4.1）：Analyzer **不做跨文件解析**，只产出本文件能看到的事实；
     符号消歧与建图统一由引擎层完成。新增语言只需实现 `Analyzer.parse` 返回本模型。
     """
-    model_config = _EXTRA_FORBID
 
+    model_config = _EXTRA_FORBID
 
     path: str
     language: str

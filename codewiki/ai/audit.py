@@ -8,6 +8,7 @@
 2. **审计失败不得阻断主流程**：审计是留痕，不是业务。写不进去就降级为 stderr
    一行，绝不让它把一次标注搞挂。
 """
+
 from __future__ import annotations
 
 import json

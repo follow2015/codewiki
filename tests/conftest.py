@@ -2,6 +2,7 @@
 
 scan-secrets: fixtures-allowed —— 本文件含故意写出的假密钥样本，用途是验证扫描器与脱敏。
 """
+
 from __future__ import annotations
 
 from pathlib import Path

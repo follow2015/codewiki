@@ -20,6 +20,7 @@ warning 说明"已忽略、正确的写法是什么"。
 上一轮 ``resolve_base_url`` 只覆盖了 ``base_url`` 一个字段，``write_back`` 就这样
 漏了两轮评审。
 """
+
 from __future__ import annotations
 
 import os

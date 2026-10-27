@@ -7,6 +7,7 @@
 所以把 SHA-256 一并入库，测试每次比对实际值。改资产就必须改哈希，改不动说明
 中间有人动过手 —— 这正是"供应链换掉上游内容时能被发现"要的效果。
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -24,8 +25,7 @@ def _recorded_digest() -> str:
     text = DIGEST.read_text(encoding="utf-8")
     records = _RECORD_RE.findall(text)
     assert len(records) == 1, (
-        f"{DIGEST.name} 应当只有一条记录，实际 {len(records)} 条 —— 多条会让"
-        "'以哪一条为准'变成隐含约定"
+        f"{DIGEST.name} 应当只有一条记录，实际 {len(records)} 条 —— 多条会让'以哪一条为准'变成隐含约定"
     )
     return records[0]
 

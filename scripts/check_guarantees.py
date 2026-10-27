@@ -18,6 +18,7 @@
     python scripts/check_guarantees.py [仓库根]
 退出码：0 通过 / 1 不通过
 """
+
 from __future__ import annotations
 
 import re
@@ -62,7 +63,7 @@ def check(root: Path) -> list[str]:
     problems: list[str] = []
 
     for missing in sorted(declared_set - used_set):
-        problems.append(f"README 承诺 `{missing}` 没有任何测试标注 guarantee(\"{missing}\")")
+        problems.append(f'README 承诺 `{missing}` 没有任何测试标注 guarantee("{missing}")')
     for extra in sorted(used_set - declared_set):
         problems.append(f"测试标注了 `{extra}`，但 README 里没有这条承诺（拼错或承诺已被删）")
     for dupe in sorted(_duplicates(declared)):

@@ -13,6 +13,7 @@
 
 scan-secrets: fixtures-allowed —— 本文件含故意写出的假密钥样本，用途是验证扫描器与脱敏。
 """
+
 from __future__ import annotations
 
 import json
@@ -70,9 +71,7 @@ def test_doctor_probe_ignores_config_base_url(tmp_path, monkeypatch):
         monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
         import codewiki.ai.client as client_mod
 
-        monkeypatch.setattr(
-            client_mod, "DEFAULT_BASE_URL", f"http://127.0.0.1:{good.server_port}/v1"
-        )
+        monkeypatch.setattr(client_mod, "DEFAULT_BASE_URL", f"http://127.0.0.1:{good.server_port}/v1")
 
         check = doctor._check_ai(probe=True)
     finally:
@@ -165,8 +164,14 @@ def test_search_codebase_aborts_catastrophic_backtracking(tmp_path, monkeypatch)
 )
 def test_redact_covers_env_style_secrets(line):
     out = redact(line)
-    for leaked in ("hunter2", "abcd1234", "xyz", "ghp_abcdefghijklmnopqrstuvwxyz0123456789",
-                   "AKIAIOSFODNN7EXAMPLE", "s3cr3t"):
+    for leaked in (
+        "hunter2",
+        "abcd1234",
+        "xyz",
+        "ghp_abcdefghijklmnopqrstuvwxyz0123456789",
+        "AKIAIOSFODNN7EXAMPLE",
+        "s3cr3t",
+    ):
         assert leaked not in out, f"{line} 里的密钥没抹掉: {out}"
 
 
@@ -246,9 +251,7 @@ def test_ci_matrix_covers_requires_python_lower_bound():
 
     spec = meta["project"]["requires-python"]
     lower = spec.split(">=")[-1].strip()
-    assert f'"{lower}"' in ci, (
-        f"requires-python 声明下界 {lower}，但 CI 矩阵里没有它 —— 那句承诺等于没人验证"
-    )
+    assert f'"{lower}"' in ci, f"requires-python 声明下界 {lower}，但 CI 矩阵里没有它 —— 那句承诺等于没人验证"
 
     versions = set(re.findall(r'"(\d+\.\d+)"', ci))
     assert len(versions) >= 2, f"CI 矩阵只剩 {versions or '一个版本'}，等于没覆盖"

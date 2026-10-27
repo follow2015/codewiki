@@ -6,6 +6,7 @@ tree-sitter 是**可选依赖**，所以整组用例在未安装时跳过 ——
 每条断言都对着**事实的形状**而不是"解析没崩"：TS 的 re-export 别名、Go 的
 方法 qualname（``Service.Run``）这种跨语言对齐点最容易被写错。
 """
+
 from __future__ import annotations
 
 import pytest
@@ -19,7 +20,7 @@ from pathlib import Path  # noqa: E402
 from codewiki.analyzers.go_analyzer import GoAnalyzer  # noqa: E402
 from codewiki.analyzers.ts_analyzer import TypeScriptAnalyzer  # noqa: E402
 
-TS_SOURCE = '''
+TS_SOURCE = """
 import Default from "./base";
 import { Named, Aliased as A } from "./mod";
 import * as NS from "./star";
@@ -45,14 +46,14 @@ export class Service extends Base implements Runnable {
 export function helper(): number {
   return 1;
 }
-'''
+"""
 
-TS_REEXPORT = '''
+TS_REEXPORT = """
 export { Service as Svc } from "./service";
 export * from "./all";
-'''
+"""
 
-GO_SOURCE = '''package demo
+GO_SOURCE = """package demo
 
 import (
 \t"errors"
@@ -78,7 +79,7 @@ func (r *Repo) Load(id int) error {
 \t}
 \treturn nil
 }
-'''
+"""
 
 
 def test_ts_imports_cover_default_named_and_namespace():

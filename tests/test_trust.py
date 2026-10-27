@@ -5,6 +5,7 @@
 主配置，绕过 README 承诺的"AI 只出建议文件、人工合并"。同期收口的还有
 ``base_url``（把 API Key 发往任意地址）与 ``model``（把代码送去它选的模型）。
 """
+
 from __future__ import annotations
 
 import pytest

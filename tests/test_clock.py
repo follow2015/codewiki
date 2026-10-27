@@ -3,6 +3,7 @@
 "增量产物 == 全量产物逐字节一致"这条验收的前提就是它：时间戳每轮不同，字节比对
 只能退化到"排除某个字段"，而排除式比对迟早漏掉真正该比的东西。
 """
+
 from __future__ import annotations
 
 import json
@@ -104,6 +105,8 @@ def test_two_runs_with_the_same_clock_produce_identical_bytes(tmp_path, monkeypa
     assert main(["analyze", "--src", str(repo), "--out", str(tmp_path / "o2")]) == 0
 
     def snapshot(root):
-        return {p.relative_to(root).as_posix(): p.read_bytes() for p in sorted(root.rglob("*")) if p.is_file()}
+        return {
+            p.relative_to(root).as_posix(): p.read_bytes() for p in sorted(root.rglob("*")) if p.is_file()
+        }
 
     assert snapshot(tmp_path / "o1") == snapshot(tmp_path / "o2")

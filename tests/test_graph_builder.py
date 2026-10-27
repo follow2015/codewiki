@@ -5,6 +5,7 @@
 2. **调用解析**：``Service.run`` → ``helper`` 落在同一模块的真实定义上；
 3. **不猜测**：解析不到就落 ``External``，绝不随机绑定（§0.3 非目标 3）。
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -68,9 +69,7 @@ def test_unknown_module_becomes_external_not_a_random_module(mini_py):
     result = build_graph(models)
 
     targets = {
-        e.target
-        for e in result.edges
-        if e.type == EdgeType.IMPORTS and e.source == module_id("orphan.py")
+        e.target for e in result.edges if e.type == EdgeType.IMPORTS and e.source == module_id("orphan.py")
     }
     assert targets == {external_id("totally_unknown_pkg")}
     assert external_id("totally_unknown_pkg") in {n.id for n in result.nodes}
@@ -102,8 +101,11 @@ def test_layer_cycle_is_an_error_level_diagnostic():
 def test_stdlib_is_classified_as_stdlib():
     from codewiki.models import FileModel, ImportFact
 
-    files = [FileModel(path="m.py", language="python", hash="0" * 16,
-                       imports=[ImportFact(module="json", lineno=1)])]
+    files = [
+        FileModel(
+            path="m.py", language="python", hash="0" * 16, imports=[ImportFact(module="json", lineno=1)]
+        )
+    ]
     result = build_graph(files)
 
     node = next(n for n in result.nodes if n.id == external_id("json"))
@@ -182,9 +184,7 @@ def test_absolute_import_with_extra_package_prefix_is_resolved(tmp_path):
     (root / "services" / "__init__.py").write_text("", encoding="utf-8")
     (root / "services" / "svc.py").write_text("VALUE = 1\n", encoding="utf-8")
     (root / "adapters" / "__init__.py").write_text("", encoding="utf-8")
-    (root / "adapters" / "a.py").write_text(
-        "from app.services.svc import VALUE\n", encoding="utf-8"
-    )
+    (root / "adapters" / "a.py").write_text("from app.services.svc import VALUE\n", encoding="utf-8")
 
     models = parse_all(root)
     with_root = build_graph(models, root_package="app")
@@ -193,9 +193,9 @@ def test_absolute_import_with_extra_package_prefix_is_resolved(tmp_path):
     src = module_id("adapters/a.py")
 
     assert (src, target) in {(e.source, e.target) for e in with_root.edges if e.type == EdgeType.IMPORTS}
-    assert (src, target) not in {
-        (e.source, e.target) for e in without.edges if e.type == EdgeType.IMPORTS
-    }, "不传 root_package 时不该凭空剥离 —— 剥离只在首段确为分析根包名时发生"
+    assert (src, target) not in {(e.source, e.target) for e in without.edges if e.type == EdgeType.IMPORTS}, (
+        "不传 root_package 时不该凭空剥离 —— 剥离只在首段确为分析根包名时发生"
+    )
 
 
 def test_root_package_strip_does_not_hijack_stdlib(tmp_path):
@@ -218,9 +218,7 @@ def test_multi_layer_without_any_layer_dependency_warns(tmp_path):
     root = tmp_path / "proj"
     (root / "adapters").mkdir(parents=True)
     (root / "core").mkdir()
-    (root / "adapters" / "a.py").write_text(
-        "from app.core.s import S\n", encoding="utf-8"
-    )
+    (root / "adapters" / "a.py").write_text("from app.core.s import S\n", encoding="utf-8")
     (root / "core" / "s.py").write_text("S = 1\n", encoding="utf-8")
 
     layers = [
@@ -350,8 +348,18 @@ def test_guess_symbol_binds_unique_candidate_still():
 def test_no_edge_endpoint_is_ever_absent():
     """引用完整性兜底：任何路径下产出的边端点都必须存在于节点表。"""
     files = [
-        _fm("m/a.py", imports=[("no.such.mod", "X", 1)], symbols=[("run", "run", 2)], calls=[("run", "o", 3), ("X", "o", 4)]),
-        _fm("m/b.py", imports=[("no.such.mod", "run", 1)], symbols=[("run", "run", 2)], calls=[("run", "o", 3)]),
+        _fm(
+            "m/a.py",
+            imports=[("no.such.mod", "X", 1)],
+            symbols=[("run", "run", 2)],
+            calls=[("run", "o", 3), ("X", "o", 4)],
+        ),
+        _fm(
+            "m/b.py",
+            imports=[("no.such.mod", "run", 1)],
+            symbols=[("run", "run", 2)],
+            calls=[("run", "o", 3)],
+        ),
     ]
     result = build_graph(files)
     ids = {n.id for n in result.nodes}
@@ -366,9 +374,7 @@ def test_relative_from_import_resolves_across_levels():
         _fm("app/services/user.py", symbols=[("User", "User", 1)]),
     ]
     result = build_graph(files)
-    imports = {
-        (e.source, e.target) for e in result.edges if e.type == EdgeType.IMPORTS
-    }
+    imports = {(e.source, e.target) for e in result.edges if e.type == EdgeType.IMPORTS}
     assert (module_id("app/pkg/a.py"), module_id("app/services/user.py")) in imports, (
         f"二级相对导入未解析: {imports}"
     )
@@ -388,11 +394,14 @@ def test_single_level_relative_import_resolves_to_sibling_package():
 def test_duplicate_call_edges_are_merged_with_weight():
     """低危收尾：同一 (source,target,type) 的重复边合并为一条、weight 累加，
     而不是靠 append 堆量（IPIP 实测 4 万条边里大量重复）。"""
-    fm = _fm("m/a.py", symbols=[("run", "run", 1), ("g", "g", 5)], calls=[("run", "obj", 6), ("run", "obj", 6)])
+    fm = _fm(
+        "m/a.py", symbols=[("run", "run", 1), ("g", "g", 5)], calls=[("run", "obj", 6), ("run", "obj", 6)]
+    )
     result = build_graph([fm])
     calls = [e for e in result.edges if e.type == EdgeType.CALLS and e.target.endswith("::run")]
     assert len(calls) == 1, calls
     assert calls[0].weight == 2
+
 
 def test_layer_cycle_enumeration_is_bounded():
     """层图两两互连时 `simple_cycles` 是组合级的。

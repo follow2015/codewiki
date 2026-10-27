@@ -11,6 +11,7 @@ SCIP）= 平行插件，不改主干（文稿 §十三 决策 5）。
 [WARN] ``FileModel`` 的字段变更属于**契约变更**，必须同步
 ``tests/golden/packet_schema.json`` 与 ``codewiki/models.py`` 的注释。
 """
+
 from __future__ import annotations
 
 import importlib
@@ -80,9 +81,7 @@ class AnalyzerRegistry:
                 raise KeyError(f"未注册的分析后端: language={language} backend={backend}")
             instance = factory()
             if instance is None:
-                raise KeyError(
-                    f"分析后端不可用（可选依赖未安装）: language={language} backend={backend}"
-                )
+                raise KeyError(f"分析后端不可用（可选依赖未安装）: language={language} backend={backend}")
             return instance
 
         for candidate in ("ast", "treesitter", "regex"):
@@ -161,4 +160,3 @@ def _register_optional_treesitter(registry: AnalyzerRegistry | None = None) -> N
     reg = REGISTRY if registry is None else registry
     for language, (module, klass) in _TS_BACKENDS.items():
         reg.register(language, "treesitter", _lazy_analyzer(module, klass))
-

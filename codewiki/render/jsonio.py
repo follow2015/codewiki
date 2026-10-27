@@ -7,6 +7,7 @@
 （``graph/importers``）也要造包，而它不该依赖渲染层。这里保留 re-export 只为
 不打断既有调用方，新代码请直接 ``from codewiki.packetio import packet_from_parts``。
 """
+
 from __future__ import annotations
 
 import json

@@ -11,6 +11,7 @@
 
 用 FakeClient 逐轮喂决定，不需要真模型。
 """
+
 from __future__ import annotations
 
 import json
@@ -120,7 +121,9 @@ def test_unknown_tool_is_reported_not_executed(mini_py, tmp_path):
 
 def test_bad_decision_is_diagnosed(mini_py, tmp_path):
     client = FakeClient(["这不是 JSON", _final("done")])
-    result = AgentLoop(client, _packet(mini_py), repo_root=mini_py, audit=AuditLog(tmp_path / "a.jsonl")).run("q")
+    result = AgentLoop(client, _packet(mini_py), repo_root=mini_py, audit=AuditLog(tmp_path / "a.jsonl")).run(
+        "q"
+    )
 
     assert result.answer == "done"
     assert any("AI_BAD_DECISION" in d for d in result.diagnostics)
@@ -128,7 +131,9 @@ def test_bad_decision_is_diagnosed(mini_py, tmp_path):
 
 def test_ai_unavailable_is_reported(mini_py, tmp_path):
     client = FakeClient([LLMUnavailable("down")])
-    result = AgentLoop(client, _packet(mini_py), repo_root=mini_py, audit=AuditLog(tmp_path / "a.jsonl")).run("q")
+    result = AgentLoop(client, _packet(mini_py), repo_root=mini_py, audit=AuditLog(tmp_path / "a.jsonl")).run(
+        "q"
+    )
 
     assert result.answer is None
     assert any("AI_UNAVAILABLE" in d for d in result.diagnostics)
@@ -153,14 +158,18 @@ def test_tool_calls_are_audited(mini_py, tmp_path):
 def test_query_graph_works_without_src(mini_py, tmp_path):
     """没有 --src 时仍可问答（只能靠图谱），不能崩。"""
     client = FakeClient([_act("query_graph", node_id="mod::pkg/core.py", direction="up"), _final("ok")])
-    result = AgentLoop(client, _packet(mini_py), repo_root=None, audit=AuditLog(tmp_path / "a.jsonl")).run("q")
+    result = AgentLoop(client, _packet(mini_py), repo_root=None, audit=AuditLog(tmp_path / "a.jsonl")).run(
+        "q"
+    )
 
     assert result.answer == "ok"
 
 
 def test_read_file_without_src_is_refused(mini_py, tmp_path):
     client = FakeClient([_act("read_file", path="pkg/core.py"), _final("ok")])
-    result = AgentLoop(client, _packet(mini_py), repo_root=None, audit=AuditLog(tmp_path / "a.jsonl")).run("q")
+    result = AgentLoop(client, _packet(mini_py), repo_root=None, audit=AuditLog(tmp_path / "a.jsonl")).run(
+        "q"
+    )
 
     assert result.answer == "ok"
     assert "未提供 --src" in client.calls[1][-1].content
@@ -173,7 +182,9 @@ def test_denied_tool_output_is_also_wrapped(mini_py, tmp_path):
     两种拒绝的文案不同，包裹的是哪一条要明确。
     """
     client = FakeClient([_act("execute_shell", command="rm -rf /"), _final("放弃")])
-    AgentLoop(client, _packet(mini_py), repo_root=mini_py, audit=AuditLog(tmp_path / "a.jsonl"), allow_shell=True).run("q")
+    AgentLoop(
+        client, _packet(mini_py), repo_root=mini_py, audit=AuditLog(tmp_path / "a.jsonl"), allow_shell=True
+    ).run("q")
     assert DELIM_BEGIN in client.calls[1][-1].content, "拒绝消息也要按不可信数据包裹"
 
 
@@ -193,7 +204,8 @@ def test_agent_cli_audits_even_without_out(tmp_path, monkeypatch, mini_py):
     from tests.conftest import FakeClient
 
     monkeypatch.setattr(
-        cli_mod, "OpenAICompatClient",
+        cli_mod,
+        "OpenAICompatClient",
         lambda **_kw: FakeClient([_final("答案 A")]),
     )
     out = tmp_path / "wiki-output"

@@ -6,6 +6,7 @@
 - **零硬编码**：跳过目录清单可由 ``codewiki.toml`` 的 ``[analysis] exclude`` 追加，
   默认值只是一个合理起点，不是业务规则。
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass

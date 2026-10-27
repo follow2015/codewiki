@@ -3,6 +3,7 @@
 对外只暴露协议与注册表：``from codewiki.analyzers import build_registry``。
 新增语言 = 新增模块 + 在 ``base._populate()`` 里注册一行。
 """
+
 from __future__ import annotations
 
 from codewiki.analyzers.base import (

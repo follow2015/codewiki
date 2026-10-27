@@ -96,7 +96,9 @@ def test_shell_denies_secret_file_arguments(evil_repo, command):
         run_shell(command, repo_root=evil_repo)
 
 
-@pytest.mark.parametrize("command", ["grep -r MUST-NOT-LEAK .", "grep -rn DB_PASSWORD .", "grep -rh MUST-NOT-LEAK ."])
+@pytest.mark.parametrize(
+    "command", ["grep -r MUST-NOT-LEAK .", "grep -rn DB_PASSWORD .", "grep -rh MUST-NOT-LEAK ."]
+)
 def test_grep_never_reads_secret_files(evil_repo, command):
     out = run_shell(command, repo_root=evil_repo)
     assert CANARY not in out
@@ -173,7 +175,7 @@ def test_model_profile_masks_literal_secrets(text, must_hide):
         "api_key = cfg.SECRETS['db']",
         "password = settings.db.password",
         "api_key: str | None = None,",
-        'budget_tokens: int | None = None,',
+        "budget_tokens: int | None = None,",
         'api_key: Optional[str] = None"',
         "token: dict[str, str] = {}",
         "token: list[str] = []",

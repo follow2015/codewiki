@@ -9,6 +9,7 @@
   图以 ``.mmd`` 原文呈现，不假装能离线渲染。
 - ``export --zip``：把整个产物目录原子化打成单个 Zip（标准库 zipfile）。
 """
+
 from __future__ import annotations
 
 import re
@@ -272,8 +273,8 @@ _PAGE_STYLES = """  :root {
   @media (max-width: 640px) { .wrap { padding: 1.4rem 1rem 3rem; } .md-body { padding: 1.2rem 1.1rem; } }"""
 
 _MERMAID_INIT = (
-    '<script>mermaid.initialize({startOnLoad:true,'
-    'maxTextSize:2000000,maxEdges:20000,'
+    "<script>mermaid.initialize({startOnLoad:true,"
+    "maxTextSize:2000000,maxEdges:20000,"
     'layout:"dagre",look:"classic",'
     'theme:matchMedia("(prefers-color-scheme: dark)").matches?"dark":"neutral"});</script>\n'
 )
@@ -319,9 +320,7 @@ def write_module_html(out_dir: Path) -> int:
         title = md_path.stem
         prefix = "" if depth == "." else "../"
         html_path = md_path.with_suffix(".html")
-        page = render_module_html(
-            md_path.read_text(encoding="utf-8"), title=title, asset_prefix=prefix
-        )
+        page = render_module_html(md_path.read_text(encoding="utf-8"), title=title, asset_prefix=prefix)
         html_path.write_text(page, encoding="utf-8")
         written += 1
     return written
@@ -389,7 +388,7 @@ def render_index_html(packet: DataPacket) -> str:
         return (
             f'  <section class="layer-group" id="{escape_attr(layer_anchor(lid))}">\n'
             f'    <h2 class="layer-head"><span class="dot" style="--c:{color}"></span>'
-            f"{escape_text(name)} <span class=\"count\" data-count=\"{len(members)}\">{len(members)}</span></h2>\n"
+            f'{escape_text(name)} <span class="count" data-count="{len(members)}">{len(members)}</span></h2>\n'
             f'    <div class="grid">\n{cards}\n    </div>\n  </section>'
         )
 

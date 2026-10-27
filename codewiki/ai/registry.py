@@ -20,6 +20,7 @@ run_shell 各写一份，审计有的工具内建、有的靠 Agent 循环补齐
 对抗参数，断言金丝雀不泄漏、仓库外读不到、仓库里的代码不被执行、普通代码不被
 改写 —— 新增工具只要注册就自动进入这道闸。
 """
+
 from __future__ import annotations
 
 import json
@@ -156,9 +157,7 @@ def _coerce(param: Param, value: Any) -> Any:
         result = list(value)
 
     if param.choices and result not in param.choices:
-        raise ToolError(
-            f"参数 {param.name} 取值非法：{result!r}（可选 {' / '.join(param.choices)}）"
-        )
+        raise ToolError(f"参数 {param.name} 取值非法：{result!r}（可选 {' / '.join(param.choices)}）")
     if param.kind == STR and len(result) > 4000:
         raise ToolError(f"参数 {param.name} 过长（{len(result)} > 4000 字符）")
     return result
@@ -170,9 +169,7 @@ def validate_args(spec: ToolSpec, args: Mapping[str, Any]) -> dict[str, Any]:
         raise ToolError("参数必须是 JSON 对象")
     unknown = set(args) - spec.param_names
     if unknown:
-        raise ToolError(
-            f"{spec.name} 不接受参数 {sorted(unknown)}（可用 {sorted(spec.param_names)}）"
-        )
+        raise ToolError(f"{spec.name} 不接受参数 {sorted(unknown)}（可用 {sorted(spec.param_names)}）")
     out: dict[str, Any] = {}
     for param in spec.params:
         if param.name not in args or args[param.name] is None:
@@ -437,9 +434,7 @@ def default_tool_names(*, allow_shell: bool = False) -> frozenset[str]:
     return frozenset(names)
 
 
-def manifest_lines(
-    specs: Iterable[ToolSpec] | None = None, *, allow_shell: bool = False
-) -> list[str]:
+def manifest_lines(specs: Iterable[ToolSpec] | None = None, *, allow_shell: bool = False) -> list[str]:
     """工具清单的文本形式（提示词与文档同源，避免手写漂移）。
 
     提示词里能出现的工具必须与实际注册的工具一致：若提示词列了 ``execute_shell``

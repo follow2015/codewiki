@@ -8,6 +8,7 @@
 下层"的合法方向，环自然断开。这是启发式，不是证明 —— 所以它写进注释，
 不写进诊断结论（不冒充算法保证）。
 """
+
 from __future__ import annotations
 
 from codewiki.graph.analysis import Cycle

@@ -8,6 +8,7 @@
 
 两条都不是靠读代码能发现的，所以钉成用例。
 """
+
 from __future__ import annotations
 
 import pytest
@@ -89,13 +90,12 @@ def test_parsed_backends_are_part_of_the_fingerprint():
 
 def test_language_whitelist_is_part_of_the_fingerprint():
     base = _cfg()
-    changed = CodewikiConfig.model_validate(
-        {"languages": {"python": {"ext": [".py"], "analyzer": "regex"}}}
-    )
+    changed = CodewikiConfig.model_validate({"languages": {"python": {"ext": [".py"], "analyzer": "regex"}}})
 
-    assert render_inputs(cfg=base, packet=_packet())["languages"] != render_inputs(
-        cfg=changed, packet=_packet()
-    )["languages"]
+    assert (
+        render_inputs(cfg=base, packet=_packet())["languages"]
+        != render_inputs(cfg=changed, packet=_packet())["languages"]
+    )
 
 
 def test_tool_version_is_part_of_the_fingerprint(monkeypatch):

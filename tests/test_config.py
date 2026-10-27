@@ -7,6 +7,7 @@
 3. **错误可修**：语法错误带行号，字段错误带键名 + 可执行建议；
 4. **注解与层**能从配置读进数据包（AI 建议合入后也走同一条路径）。
 """
+
 from __future__ import annotations
 
 import tomllib
@@ -102,9 +103,7 @@ def test_line_number_survives_python_without_lineno_attr(tmp_path, monkeypatch):
         ("a = 'unterminated\n", 2),
     ],
 )
-def test_end_of_document_line_matches_across_python_versions(
-    tmp_path, monkeypatch, bad_text, expected_line
-):
+def test_end_of_document_line_matches_across_python_versions(tmp_path, monkeypatch, bad_text, expected_line):
     """``at end of document`` 类错误：3.14 报最后一行，老版本不能报空。
 
     两个版本给出的**整条消息必须一字不差**，否则同一个坏配置在 3.11 用户和
@@ -188,7 +187,9 @@ def test_root_path_pattern_matches_everything_but_loses_to_finer_layers():
 
 def test_root_path_variants_are_equivalent():
     for pattern in (".", "./", ""):
-        cfg = CodewikiConfig(architecture=ArchitectureSection(layers=[LayerSpec(name="全部", paths=[pattern])]))
+        cfg = CodewikiConfig(
+            architecture=ArchitectureSection(layers=[LayerSpec(name="全部", paths=[pattern])])
+        )
         assert cfg.layer_of("a/b.py") == "layer::全部", pattern
 
 
@@ -197,7 +198,7 @@ def test_unknown_top_level_key_is_rejected(tmp_path):
     from codewiki.config import ConfigError, load_config
 
     p = tmp_path / "codewiki.toml"
-    p.write_text('[architect]\nlayers = []\n', encoding="utf-8")
+    p.write_text("[architect]\nlayers = []\n", encoding="utf-8")
     try:
         load_config(p)
     except ConfigError as exc:
@@ -210,7 +211,7 @@ def test_unknown_section_key_is_rejected(tmp_path):
     from codewiki.config import ConfigError, load_config
 
     p = tmp_path / "codewiki.toml"
-    p.write_text('[analysis]\nmin_confidnce = 0.6\n', encoding="utf-8")
+    p.write_text("[analysis]\nmin_confidnce = 0.6\n", encoding="utf-8")
     try:
         load_config(p)
     except ConfigError as exc:

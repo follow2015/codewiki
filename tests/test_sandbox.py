@@ -5,6 +5,7 @@
 
 拒绝用例断言的是 :class:`ShellDenied` —— 抛异常意味着命令**根本没进子进程**。
 """
+
 from __future__ import annotations
 
 import os
@@ -135,10 +136,19 @@ def _init_git_repo(tmp_path):
     import subprocess as sp
 
     def run(*args):
-        return sp.run(["git", "-C", str(tmp_path), *args], capture_output=True, text=True,
-                      env={"PATH": os.environ["PATH"], "GIT_CONFIG_NOSYSTEM": "1",
-                           "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t",
-                           "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"})
+        return sp.run(
+            ["git", "-C", str(tmp_path), *args],
+            capture_output=True,
+            text=True,
+            env={
+                "PATH": os.environ["PATH"],
+                "GIT_CONFIG_NOSYSTEM": "1",
+                "GIT_AUTHOR_NAME": "t",
+                "GIT_AUTHOR_EMAIL": "t@t",
+                "GIT_COMMITTER_NAME": "t",
+                "GIT_COMMITTER_EMAIL": "t@t",
+            },
+        )
 
     run("init", "-q")
     (tmp_path / "f.txt").write_text("hello\n", encoding="utf-8")

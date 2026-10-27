@@ -9,6 +9,7 @@
 2. **不解析别名/路径映射**（tsconfig paths）：那需要读 tsconfig 并做前缀替换，
    属于跨文件配置解析，交给引擎层的模块解析（与 Python 的相对导入同理）。
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -75,7 +76,9 @@ class TypeScriptAnalyzer(TreeSitterAnalyzer):
                                 name = self._child_text(spec, "name", data)
                                 alias = self._child_text(spec, "alias", data)
                                 facts.append(
-                                    ImportFact(module=module, name=name, alias=alias, lineno=lineno, kind="from")
+                                    ImportFact(
+                                        module=module, name=name, alias=alias, lineno=lineno, kind="from"
+                                    )
                                 )
                     elif part.type == "namespace_import":
                         facts.append(ImportFact(module=module, name="*", lineno=lineno, kind="from"))
@@ -91,7 +94,11 @@ class TypeScriptAnalyzer(TreeSitterAnalyzer):
         out: list[InheritanceFact] = []
         for child in node.children:
             if child.type in ("extends_clause", "implements_clause"):
-                inner = child.child_by_field_name("value") or child.named_children[0] if child.named_children else None
+                inner = (
+                    child.child_by_field_name("value") or child.named_children[0]
+                    if child.named_children
+                    else None
+                )
                 if inner is not None:
                     base = self._text(inner, data).strip()
                     out.append(InheritanceFact(child=class_name, base=base))

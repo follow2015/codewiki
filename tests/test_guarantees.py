@@ -3,6 +3,7 @@
 CI 里会单独跑 ``scripts/check_guarantees.py``；这里再断言一次，是为了让"承诺
 漂移"在本地 pytest 就红 —— 而不是等推送后才发现文档早就没跟上代码。
 """
+
 from __future__ import annotations
 
 import importlib.util

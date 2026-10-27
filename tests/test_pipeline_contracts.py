@@ -8,6 +8,7 @@
 
 约定写成可执行的断言后，改坏了当场红，不靠评审时有人记得。
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -72,7 +73,9 @@ def setup_module(module):  # noqa: ANN001 - pytest 钩子
 
 
 def _digest(backend: str) -> str:
-    model = REGISTRY.get("python", backend).parse(Path("parser_sample.py"), SAMPLE.read_text(encoding="utf-8"))
+    model = REGISTRY.get("python", backend).parse(
+        Path("parser_sample.py"), SAMPLE.read_text(encoding="utf-8")
+    )
     payload = json.dumps(model.model_dump(mode="json"), ensure_ascii=False, sort_keys=True)
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 

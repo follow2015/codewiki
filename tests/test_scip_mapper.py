@@ -12,6 +12,7 @@
 3. kind 判定顺序 —— ``Service#run().`` 同时以 ``()`` 和 ``.`` 结尾，先判后者
    会把它当成字段。
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -39,9 +40,7 @@ def test_roundtrip_varint_and_len():
 
 
 def test_repeated_fields_keep_order():
-    raw = pb.encode_message(
-        [(3, pb.WIRE_LEN, "a"), (3, pb.WIRE_LEN, "b"), (3, pb.WIRE_LEN, "c")]
-    )
+    raw = pb.encode_message([(3, pb.WIRE_LEN, "a"), (3, pb.WIRE_LEN, "b"), (3, pb.WIRE_LEN, "c")])
     assert [pb.text(f) for f in pb.decode_message(raw)[3]] == ["a", "b", "c"]
 
 

@@ -9,6 +9,7 @@
 3. 确定性：Louvain 需要固定 ``seed``，否则同一份图谱两次跑出不同建议，
    用户无法 diff 审阅。
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -79,14 +80,8 @@ def suggest_layers(packet: DataPacket, *, seed: int = 42) -> list[SuggestedLayer
     layers: list[SuggestedLayer] = []
     for members in communities:
         member_set = set(members)
-        internal = sum(
-            1 for u, v in graph.edges() if u in member_set and v in member_set
-        )
-        external = sum(
-            1
-            for u, v in graph.edges()
-            if (u in member_set) ^ (v in member_set)
-        )
+        internal = sum(1 for u, v in graph.edges() if u in member_set and v in member_set)
+        external = sum(1 for u, v in graph.edges() if (u in member_set) ^ (v in member_set))
         module_ids = sorted(members)
         module_paths = sorted(paths_by_node.get(m, m.removeprefix("mod::")) for m in module_ids)
         directory = _common_dir(module_paths)

@@ -12,6 +12,7 @@
 **判据保守**：多算一项的代价是偶尔多渲几页，漏算一项的代价是页面上留着旧结论
 而没人发现 —— 后者不可接受，所以只要"渲染时读过"就进表。
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -67,9 +68,7 @@ def render_inputs(
             sorted((name, tuple(spec.ext), spec.analyzer) for name, spec in cfg.languages.items())
         ),
         "layers": _sig([(layer.id, layer.name, layer.color, layer.order) for layer in packet.layers]),
-        "annotations": _sig(
-            [(a.target, a.label, a.note, a.source, a.reviewed) for a in packet.annotations]
-        ),
+        "annotations": _sig([(a.target, a.label, a.note, a.source, a.reviewed) for a in packet.annotations]),
         "min_confidence": f"{cfg.analysis.min_confidence if min_confidence is None else min_confidence:g}",
         "max_nodes": str(cfg.analysis.max_nodes if max_nodes is None else max_nodes),
         "backends": _sig(sorted(backends or ())),

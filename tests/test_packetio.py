@@ -6,6 +6,7 @@
 - 版本**更旧**：走 ``migrate_n_to_n+1`` 链，逐级推进版本号；
 - 结构不符 / 坏 JSON：给可读原因，调用方转退出码 2。
 """
+
 from __future__ import annotations
 
 import json

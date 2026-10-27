@@ -11,6 +11,7 @@
 * :mod:`codewiki.ai.diagram` —— AI 时序图 + 坏图零落盘回退；
 * :mod:`codewiki.ai.audit` —— JSONL 审计（脱敏）。
 """
+
 from __future__ import annotations
 
 __all__ = ["annotate", "audit", "cache", "client", "diagram", "merge", "prompts", "sandbox", "tools"]

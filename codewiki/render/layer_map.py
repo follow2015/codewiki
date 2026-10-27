@@ -14,6 +14,7 @@
 全部内联 SVG，颜色走页面 CSS 变量（明暗主题自动跟随）；层色逻辑与首页
 分组色点同源（``layer_color``）。单模块页的 mermaid 上下文图**不受影响**。
 """
+
 from __future__ import annotations
 
 import re
@@ -137,8 +138,7 @@ def _band_svg(y: float, lid: str, name: str, members: list, width: float) -> str
         f'style="fill:var(--text)">{_esc(name)}</text>',
         f'<text x="{width - 18}" y="{y + 30}" font-size="11.5" text-anchor="end" '
         f'style="fill:var(--muted)">{len(modules)} 模块 · {symbols} 符号</text>',
-        f'<text x="22" y="{y + 56}" font-size="10.5" '
-        f'style="fill:var(--faint)">{_esc(dir_chips)}</text>',
+        f'<text x="22" y="{y + 56}" font-size="10.5" style="fill:var(--faint)">{_esc(dir_chips)}</text>',
         "</a>",
     ]
     return "\n".join(parts)
@@ -210,8 +210,7 @@ def render_layer_map_svg(packet: DataPacket, *, max_flows: int = 10) -> str:
     )
     if not flows:
         parts.append(
-            f'<text x="{px + 18}" y="{60}" font-size="11" '
-            f'style="fill:var(--faint)">无跨层引用</text>'
+            f'<text x="{px + 18}" y="{60}" font-size="11" style="fill:var(--faint)">无跨层引用</text>'
         )
     row_y = 60.0
     for (src_lid, dst_lid), count in flows:

@@ -5,6 +5,7 @@
 * 只测坏图 ⇒ 把特征写严了会误杀合法图（合法 label 里的中文、括号实体）；
 * 只测好图 ⇒ 特征退化成"永远通过"，坏图照样落盘。
 """
+
 from __future__ import annotations
 
 from codewiki.graph import build_graph
@@ -26,7 +27,7 @@ def test_missing_type_declaration_is_caught():
 
 
 def test_unsupported_type_is_caught():
-    issues = validate_l1("pie title x\n  \"a\" : 1\n")
+    issues = validate_l1('pie title x\n  "a" : 1\n')
 
     assert any(i.code == "TYPE_UNSUPPORTED" for i in issues)
 
@@ -79,13 +80,7 @@ def test_generated_system_context_passes_l1(mini_py):
 
 
 def test_legal_writing_with_chinese_and_entities_passes():
-    text = (
-        "flowchart TD\n"
-        '  subgraph S["服务层"]\n'
-        '    A["订单 #40;核心#41;"]\n'
-        "  end\n"
-        '  A -->|3| B["库存"]\n'
-    )
+    text = 'flowchart TD\n  subgraph S["服务层"]\n    A["订单 #40;核心#41;"]\n  end\n  A -->|3| B["库存"]\n'
     assert validate_l1(text) == []
 
 

@@ -12,6 +12,7 @@
 3. **AI 失败不阻断静态产物**：模型不可达 / 认证失败时，已生成的部分照写，
    诊断里明确标 ``AI_UNAVAILABLE``，调用方（CLI）自行决定退出码。
 """
+
 from __future__ import annotations
 
 import json
@@ -88,7 +89,9 @@ def select_modules(packet, *, top_n: int = 30, protected: set[str] | None = None
     for node in ranked:
         if node.id in protected:
             continue
-        picked.append({"id": node.id, "path": node.path, "layer": node.layer_id, "degree": degrees.get(node.id, 0)})
+        picked.append(
+            {"id": node.id, "path": node.path, "layer": node.layer_id, "degree": degrees.get(node.id, 0)}
+        )
         if len(picked) >= top_n:
             break
     return picked
@@ -106,10 +109,7 @@ def build_context(packet, cfg, *, src_root: Path | None) -> tuple[list[str], lis
     layers = [layer.name for layer in cfg.architecture.layers]
     if not layers:
         layers = [layer.name for layer in packet.layers]
-    annotations = [
-        f"{a.target}｜{a.label or ''}｜{a.note}".strip("｜")
-        for a in cfg.annotations
-    ] or [
+    annotations = [f"{a.target}｜{a.label or ''}｜{a.note}".strip("｜") for a in cfg.annotations] or [
         f"{a.target}｜{a.label or ''}｜{a.note}".strip("｜")
         for a in packet.annotations
         if a.source == "human"
@@ -265,7 +265,9 @@ def annotate_modules(
                     )
                 )
                 if audit:
-                    audit.record(tool="llm.chat", args={"target": module["id"]}, outcome="error", detail=str(exc))
+                    audit.record(
+                        tool="llm.chat", args={"target": module["id"]}, outcome="error", detail=str(exc)
+                    )
                 break
             raw = reply.content
             budget.spend(reply.total_tokens or estimate_tokens(user_prompt + raw))

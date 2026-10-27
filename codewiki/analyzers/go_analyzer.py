@@ -8,6 +8,7 @@ Go 的"类"是 struct + 方法接收者，所以：
   （不这么做的话，所有方法都叫同名，跨文件调用边会连错）；
 * 函数名首字母大小写即导出语义，据此填 ``exports``（Go 没有 export 关键字）。
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -52,7 +53,9 @@ class GoAnalyzer(TreeSitterAnalyzer):
                 module = path_text.strip().strip('"')
                 alias = self._child_text(child, "name", data)
                 facts.append(
-                    ImportFact(module=module, alias=alias or None, lineno=child.start_point[0] + 1, kind="import")
+                    ImportFact(
+                        module=module, alias=alias or None, lineno=child.start_point[0] + 1, kind="import"
+                    )
                 )
             elif child.type == "import_spec_list":
                 for spec in child.children:

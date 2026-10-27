@@ -13,6 +13,7 @@
 3. **密钥不进模型**（外部评审 2026-10-23）：``read_file`` 能读到仓库里的
    ``.env`` —— 内容发给模型前必须脱敏（脱敏不能只做在审计日志上）。
 """
+
 from __future__ import annotations
 
 import json
@@ -227,9 +228,7 @@ def _scan_in_subprocess(keyword: str, *, root: Path, candidates: list[str], max_
     try:
         proc = run_isolated_python(worker, payload=payload, timeout=REGEX_TIMEOUT_S)
     except SubprocessTimeout as exc:
-        raise ToolError(
-            f"正则匹配超过 {REGEX_TIMEOUT_S:g} 秒已中止（疑似灾难性回溯），请改写模式"
-        ) from exc
+        raise ToolError(f"正则匹配超过 {REGEX_TIMEOUT_S:g} 秒已中止（疑似灾难性回溯），请改写模式") from exc
     except SubprocessFailed as exc:
         raise ToolError(f"正则扫描子进程无法启动: {exc}") from exc
 
@@ -242,10 +241,7 @@ def _scan_in_subprocess(keyword: str, *, root: Path, candidates: list[str], max_
     if isinstance(raw, dict) and "error" in raw:
         raise ToolError(f"正则扫描失败: {raw['error']}")
 
-    return [
-        {"path": hit["path"], "line": hit["line"], "text": redact_model(hit["text"])}
-        for hit in raw
-    ]
+    return [{"path": hit["path"], "line": hit["line"], "text": redact_model(hit["text"])} for hit in raw]
 
 
 MAX_LINE_CHARS = 1000
@@ -262,8 +258,7 @@ def _reject_catastrophic_backtracking(keyword: str) -> None:
     compact = keyword.replace("?:", "")
     if _NESTED_QUANTIFIER.search(compact):
         raise ToolError(
-            "正则含嵌套量词（如 (x+)+），属灾难性回溯高危形状，拒绝执行；"
-            "请改写为无嵌套量词的等价模式"
+            "正则含嵌套量词（如 (x+)+），属灾难性回溯高危形状，拒绝执行；请改写为无嵌套量词的等价模式"
         )
 
 
@@ -326,9 +321,7 @@ def query_graph(
 
     key = str(direction or "both").strip().lower()
     if key not in _DIRECTION_ALIASES:
-        raise ToolError(
-            f"direction 取值非法：{direction!r}（可选 both / upstream / downstream）"
-        )
+        raise ToolError(f"direction 取值非法：{direction!r}（可选 both / upstream / downstream）")
     direction = _DIRECTION_ALIASES[key]
 
     nodes = {n.id: n.model_dump(mode="json") for n in packet.nodes}
@@ -388,9 +381,7 @@ def _deny_secret_args(command: str) -> None:
             continue
         for part in arg.split(":"):
             if part and is_secret_file(Path(part.strip())):
-                raise ToolError(
-                    f"拒绝读取疑似密钥文件: {part}（.env / 私钥 / 凭据文件不入模型上下文）"
-                )
+                raise ToolError(f"拒绝读取疑似密钥文件: {part}（.env / 私钥 / 凭据文件不入模型上下文）")
     if argv[:2] == ["git", "grep"] and (
         "--no-filename" in argv[2:] or any(_GIT_NO_FILENAME_FLAG.fullmatch(a) for a in argv[2:])
     ):

@@ -15,6 +15,7 @@
    不阻断分析；
 3. **命中率要可见**：调用方会把 hit/miss 写进诊断，否则"缓存在不在工作"没人知道。
 """
+
 from __future__ import annotations
 
 import hashlib

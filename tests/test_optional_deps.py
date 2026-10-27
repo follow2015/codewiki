@@ -4,6 +4,7 @@ CI 实测回归（ubuntu + 纯运行时依赖）：TypeScriptAnalyzer 的
 ``import tree_sitter_typescript`` 在 ``__init__`` 内执行，此前 try/except
 只护住模块导入 —— 构造函数抛 ImportError 直接炸掉整个 CLI。
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -23,9 +24,7 @@ def test_register_defaults_survives_missing_treesitter_runtime(
     def _boom(self) -> None:  # noqa: ANN001
         raise ImportError("No module named 'tree_sitter_typescript'")
 
-    monkeypatch.setattr(
-        "codewiki.analyzers.ts_analyzer.TypeScriptAnalyzer.__init__", _boom
-    )
+    monkeypatch.setattr("codewiki.analyzers.ts_analyzer.TypeScriptAnalyzer.__init__", _boom)
 
     analyzer_base._register_optional_treesitter()
 
@@ -38,9 +37,7 @@ def test_register_defaults_still_registers_python_and_regex(
     def _boom(self) -> None:  # noqa: ANN001
         raise ImportError("No module named 'tree_sitter_typescript'")
 
-    monkeypatch.setattr(
-        "codewiki.analyzers.ts_analyzer.TypeScriptAnalyzer.__init__", _boom
-    )
+    monkeypatch.setattr("codewiki.analyzers.ts_analyzer.TypeScriptAnalyzer.__init__", _boom)
 
     fresh = analyzer_base.AnalyzerRegistry()
     monkeypatch.setattr(analyzer_base, "REGISTRY", fresh)

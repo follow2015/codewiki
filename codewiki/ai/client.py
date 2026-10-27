@@ -11,6 +11,7 @@
 
 重试只针对 429 / 5xx，指数退避；其它 4xx 直接失败（§5.5）。
 """
+
 from __future__ import annotations
 
 import json
@@ -37,9 +38,7 @@ def validate_base_url(base_url: str) -> str:
     """
     parsed = urllib.parse.urlparse(base_url or "")
     if parsed.scheme not in ("http", "https") or not parsed.netloc:
-        raise LLMError(
-            f"base_url 必须是 http/https URL: {base_url!r}（拒绝 file://、ftp:// 等协议）"
-        )
+        raise LLMError(f"base_url 必须是 http/https URL: {base_url!r}（拒绝 file://、ftp:// 等协议）")
     return base_url.rstrip("/")
 
 

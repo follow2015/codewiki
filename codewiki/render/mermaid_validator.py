@@ -16,6 +16,7 @@
 * 代码围栏未闭合；
 * 富文本出现 ``<br/>`` / ``<b>`` / ``<i>`` 之外的标签。
 """
+
 from __future__ import annotations
 
 import re
@@ -87,9 +88,7 @@ def validate_l1(text: str) -> list[Issue]:
         for quoted in re.findall(r'"([^"]*)"', stripped):
             for ch in "()[]{}":
                 if ch in quoted and f"#{ord(ch)};" not in quoted:
-                    issues.append(
-                        Issue("LABEL_UNESCAPED", f"第 {lineno} 行 Label 含未转义字符 {ch!r}")
-                    )
+                    issues.append(Issue("LABEL_UNESCAPED", f"第 {lineno} 行 Label 含未转义字符 {ch!r}"))
                     break
 
         for tag in _RE_ANY_TAG.finditer(stripped):

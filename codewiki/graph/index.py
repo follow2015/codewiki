@@ -13,6 +13,7 @@ Wiki 75s 里绝大部分都在"找邻居"），而解析与建图加起来不到
 
 索引是**只读快照**：建完之后不得随 packet 变化（packet 在渲染期不变）。
 """
+
 from __future__ import annotations
 
 from codewiki.models import Edge, EdgeType, Node, NodeType

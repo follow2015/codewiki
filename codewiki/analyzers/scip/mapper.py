@@ -18,6 +18,7 @@
 ``symbol`` 字符串形如 ``scip-python python pkg/mod 1.0 Service#run()``，
 拆分按 SCIP 规范：``<scheme> <manager> <package> <version> <descriptor>``。
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -124,9 +125,7 @@ def _apply_definition(symbols: list[SymbolFact], symbol: str, line: int) -> None
                 fact.lineno = line
                 fact.endlineno = line
             return
-    symbols.append(
-        SymbolFact(name=name, qualname=name, kind=kind_of(symbol), lineno=line, endlineno=line)
-    )
+    symbols.append(SymbolFact(name=name, qualname=name, kind=kind_of(symbol), lineno=line, endlineno=line))
 
 
 def _enclosing_label(field: pb.Field) -> str | None:

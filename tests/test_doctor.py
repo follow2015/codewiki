@@ -6,6 +6,7 @@ doctor **只报告不阻断**（退出码恒 0），所以判据要钉的是"结
 - Node 主版本 ≠ 24 → warning（基线钉死 24 LTS 的决策要落到代码里）；
 - 缺失的可选依赖只能是 info，不能是 error（否则等于把可选变必选）。
 """
+
 from __future__ import annotations
 
 import sys
@@ -56,9 +57,7 @@ def test_node_off_baseline_major_is_warning(monkeypatch):
 
 def test_node_on_baseline_is_ok(monkeypatch):
     monkeypatch.setattr(doctor.shutil, "which", lambda _n: "/usr/bin/node")
-    monkeypatch.setattr(
-        doctor, "run", lambda *_a, **_k: type("R", (), {"stdout": "v24.9.0\n"})()
-    )
+    monkeypatch.setattr(doctor, "run", lambda *_a, **_k: type("R", (), {"stdout": "v24.9.0\n"})())
 
     assert doctor._check_node().level == "ok"
 
@@ -72,8 +71,6 @@ def test_required_backends_are_present():
 
 
 def test_report_never_hides_a_warning():
-    report = doctor.render_report(
-        [doctor.Check("warning", "X", "有问题"), doctor.Check("ok", "Y", "正常")]
-    )
+    report = doctor.render_report([doctor.Check("warning", "X", "有问题"), doctor.Check("ok", "Y", "正常")])
 
     assert "结论：warning" in report and "X" in report

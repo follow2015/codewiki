@@ -10,6 +10,7 @@
 2. **版本锁死**：tree-sitter 与语言包三者作为一组联动升级（``==``），
    语法节点名会随 grammar 版本变化，混版本会静默少解析。
 """
+
 from __future__ import annotations
 
 import hashlib

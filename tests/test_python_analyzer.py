@@ -6,6 +6,7 @@
 3. 继承事实记录基类名（消歧在引擎层）；
 4. ``__all__`` 只影响公开面，不影响对未列入名字的解析（§2.4）。
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -14,9 +15,7 @@ from codewiki.analyzers.python_analyzer import PythonAstAnalyzer
 
 
 def test_symbols_and_ownership():
-    content = (Path(__file__).parent / "fixtures" / "mini_py" / "pkg" / "core.py").read_text(
-        encoding="utf-8"
-    )
+    content = (Path(__file__).parent / "fixtures" / "mini_py" / "pkg" / "core.py").read_text(encoding="utf-8")
     model = PythonAstAnalyzer().parse(Path("pkg/core.py"), content)
 
     names = {s.qualname: s for s in model.symbols}
@@ -80,9 +79,7 @@ def test_content_hash_is_stable():
 def test_relative_import_level_encoded_as_leading_dots():
     """``from ..services.user import User`` 的 level=2 必须保留（编码为前导点），
     否则引擎层会把它当绝对模块名解析，误绑同名路径或落 External。"""
-    model = PythonAstAnalyzer().parse(
-        Path("app/pkg/a.py"), "from ..services.user import User\n"
-    )
+    model = PythonAstAnalyzer().parse(Path("app/pkg/a.py"), "from ..services.user import User\n")
     assert model.imports[0].module == "..services.user"
 
 
@@ -129,8 +126,6 @@ def test_nested_class_edges_survive_graph_build():
     )
     result = build_graph([PythonAstAnalyzer().parse(Path("nested.py"), source)])
 
-    inherits = [
-        (e.source, e.target) for e in result.edges if e.type == EdgeType.INHERITS
-    ]
+    inherits = [(e.source, e.target) for e in result.edges if e.type == EdgeType.INHERITS]
     assert ("sym::nested.py::Outer.Inner", "sym::nested.py::Root") in inherits
     assert not [d for d in result.diagnostics if d.code == "DANGLING_EDGE_DROPPED"]

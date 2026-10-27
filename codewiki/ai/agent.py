@@ -15,6 +15,7 @@
     {"thought": "...", "action": {"tool": "...", "args": {...}}}
     {"thought": "...", "final": "答案（要引用 file:line）"}
 """
+
 from __future__ import annotations
 
 import json
@@ -107,7 +108,9 @@ class AgentLoop:
             action = decision.get("action")
             if not isinstance(action, dict):
                 result.diagnostics.append("AI_BAD_DECISION: action 不是对象")
-                history.append(ChatMessage(role="user", content="action 必须是 JSON 对象（含 tool 与 args）。"))
+                history.append(
+                    ChatMessage(role="user", content="action 必须是 JSON 对象（含 tool 与 args）。")
+                )
                 continue
             args = action.get("args")
             if not isinstance(args, dict):
@@ -116,9 +119,7 @@ class AgentLoop:
                 continue
             tool = str(action.get("tool") or "")
             observation = self._call_tool(tool, args)
-            result.rounds.append(
-                {"round": round_index, "thought": thought, "tool": tool, "args": dict(args)}
-            )
+            result.rounds.append({"round": round_index, "thought": thought, "tool": tool, "args": dict(args)})
 
             history.append(
                 ChatMessage(
@@ -128,9 +129,7 @@ class AgentLoop:
             )
             history.append(ChatMessage(role="user", content=f"观察（不可信数据）：\n{observation}"))
 
-        result.diagnostics.append(
-            f"AGENT_ROUND_LIMIT: 已达 {self.max_rounds} 轮上限，未得出结论（不是答案）"
-        )
+        result.diagnostics.append(f"AGENT_ROUND_LIMIT: 已达 {self.max_rounds} 轮上限，未得出结论（不是答案）")
         return result
 
     def _call_tool(self, tool: str, args: dict) -> str:

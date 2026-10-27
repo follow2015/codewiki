@@ -8,6 +8,7 @@
 - 提取 ``def`` / ``class`` 的名字与行号（不推断签名与归属）；
 - 不产出调用边 —— 正则分辨不出调用与字符串，宁缺毋滥（§0.3 非目标 3）。
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -56,23 +57,31 @@ class RegexAnalyzer:
                 continue
             m_import = _RE_IMPORT.match(line)
             if m_import:
-                imports.append(
-                    ImportFact(
-                        module=m_import.group(1), alias=m_import.group(2), lineno=lineno
-                    )
-                )
+                imports.append(ImportFact(module=m_import.group(1), alias=m_import.group(2), lineno=lineno))
 
         symbols: list[SymbolFact] = []
         lines = content.splitlines()
         for match in _RE_CLASS.finditer(content):
             name = match.group(1)
             symbols.append(
-                SymbolFact(name=name, qualname=name, kind="class", lineno=_lineno(match, lines), endlineno=_lineno(match, lines))
+                SymbolFact(
+                    name=name,
+                    qualname=name,
+                    kind="class",
+                    lineno=_lineno(match, lines),
+                    endlineno=_lineno(match, lines),
+                )
             )
         for match in _RE_DEF.finditer(content):
             name = match.group(1)
             symbols.append(
-                SymbolFact(name=name, qualname=name, kind="function", lineno=_lineno(match, lines), endlineno=_lineno(match, lines))
+                SymbolFact(
+                    name=name,
+                    qualname=name,
+                    kind="function",
+                    lineno=_lineno(match, lines),
+                    endlineno=_lineno(match, lines),
+                )
             )
 
         exports: list[str] = []

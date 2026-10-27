@@ -6,6 +6,7 @@
 * diff：两个快照之间改动了什么、影响到谁；
 * suggest-layers → merge-layers：建议能产出并合回配置，且**人工层还在**。
 """
+
 from __future__ import annotations
 
 import json
@@ -77,11 +78,12 @@ def test_diff_between_two_snapshots(cyclic_py, tmp_path, capsys):
 
 def test_suggest_layers_then_merge_layers(prepared, tmp_path, capsys):
     config = tmp_path / "codewiki.toml"
-    config.write_text(
-        '[[architecture.layers]]\nname = "手工层"\npaths = ["hand"]\n', encoding="utf-8"
-    )
+    config.write_text('[[architecture.layers]]\nname = "手工层"\npaths = ["hand"]\n', encoding="utf-8")
 
-    assert main(["suggest-layers", "--input", str(prepared / "data" / "codewiki.json"), "--out", str(prepared)]) == 0
+    assert (
+        main(["suggest-layers", "--input", str(prepared / "data" / "codewiki.json"), "--out", str(prepared)])
+        == 0
+    )
     suggest = prepared / "suggestions" / "suggested-layers.toml"
     assert suggest.exists()
 
@@ -110,7 +112,7 @@ def test_large_repo_pages_instead_of_crashing(mini_py, tmp_path):
     config = tmp_path / "codewiki.toml"
     config.write_text(
         "[analysis]\nmax_nodes = 2\n\n"
-        '[architecture]\n\n'
+        "[architecture]\n\n"
         '[[architecture.layers]]\nname = "接口层"\npaths = ["app"]\norder = 1\n\n'
         '[[architecture.layers]]\nname = "服务层"\npaths = ["pkg"]\norder = 2\n',
         encoding="utf-8",

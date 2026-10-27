@@ -14,6 +14,7 @@
 关于"外部图谱不依赖其运行时"：本模块只依赖 JSON 文本，**不 import graphify**，
 因此 codewiki 可以独立安装与运行。
 """
+
 from __future__ import annotations
 
 import json
@@ -177,7 +178,9 @@ def load_graphify(path: Path) -> tuple[DataPacket, list[Diagnostic]]:
         edges=edges,
         annotations=[],
         diagnostics=[],
-        provenance={BACKEND: Provenance(backend=BACKEND, version=str(payload.get("built_at_commit") or "unknown"))},
+        provenance={
+            BACKEND: Provenance(backend=BACKEND, version=str(payload.get("built_at_commit") or "unknown"))
+        },
     )
     return packet, diagnostics
 

@@ -5,6 +5,7 @@
 
 另生成 ``index.md``：分层 → 模块清单，带诊断摘要。
 """
+
 from __future__ import annotations
 
 from codewiki.graph.index import GraphIndex
@@ -126,9 +127,7 @@ def render_module_page(
             signature = (symbol.signature or "").replace("|", "\\|")
             doc = (symbol.docstring or "").splitlines()[0] if symbol.docstring else ""
             doc = doc.replace("|", "\\|")
-            lines.append(
-                f"| `{symbol.name}` | {symbol.kind} | {symbol.line_start} | `{signature}` | {doc} |"
-            )
+            lines.append(f"| `{symbol.name}` | {symbol.kind} | {symbol.line_start} | `{signature}` | {doc} |")
         lines.append("")
 
     upstream_map, downstream_map = idx.neighbors(module_id)
@@ -181,7 +180,7 @@ def _link(nodes: dict, node_id: str, slug_map: dict[str, str] | None = None) -> 
         if owner and owner.path:
             return f"`{node.name}`（{owner.path}）"
     if node_id.startswith("ext::"):
-        return f"`{node_id[len('ext::'):]}`（外部）"
+        return f"`{node_id[len('ext::') :]}`（外部）"
     return f"`{node_id}`"
 
 

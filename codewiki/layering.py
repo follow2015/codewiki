@@ -5,6 +5,7 @@
 glob），就会出现"CLI 认为模块属于服务层、引擎认为是数据层"的幽灵不一致。
 配置层负责提供 (层 id, paths)，引擎层负责在建图时用同一套算法，两者共用这里。
 """
+
 from __future__ import annotations
 
 from collections.abc import Iterable
@@ -40,7 +41,9 @@ def _normalize(pattern: str) -> str:
     return "" if stripped in ("", ".") else stripped
 
 
-def layer_of(rel_path: str, layers: Iterable[tuple[str, list[str]]], *, default: str = UNLAYERED_LAYER_ID) -> str:
+def layer_of(
+    rel_path: str, layers: Iterable[tuple[str, list[str]]], *, default: str = UNLAYERED_LAYER_ID
+) -> str:
     """匹配层 id；无命中返回 ``default``（默认虚拟层，由调用方决定是否出诊断）。"""
     matched = longest_prefix_match(rel_path, layers)
     return matched[1] if matched else default

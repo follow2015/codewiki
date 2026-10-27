@@ -7,6 +7,7 @@
 * **写完的配置必须还能被 load_config 读回来**：合并是写用户的文件，写坏了比
   没合并更糟 —— 所以每条写入用例都要 round-trip 一次。
 """
+
 from __future__ import annotations
 
 import tomllib

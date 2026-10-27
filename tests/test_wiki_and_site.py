@@ -6,6 +6,7 @@
 2. 索引页给出分层 → 模块的导航 + 诊断摘要；
 3. ``export --zip`` 原子化打包，且**不把临时文件打进去**。
 """
+
 from __future__ import annotations
 
 import zipfile
@@ -35,7 +36,9 @@ def test_module_page_covers_symbols_neighbors_and_annotations(mini_py):
     packet = _packet(
         mini_py,
         annotations=[
-            Annotation(target="mod::pkg/core.py", label="核心", note="下单主链路。", source="human", reviewed=True)
+            Annotation(
+                target="mod::pkg/core.py", label="核心", note="下单主链路。", source="human", reviewed=True
+            )
         ],
     )
     page = render_module_page(packet, "mod::pkg/core.py", diagram_text=None)
@@ -49,7 +52,7 @@ def test_module_page_covers_symbols_neighbors_and_annotations(mini_py):
 
 def test_module_page_embeds_the_context_diagram(mini_py):
     packet = _packet(mini_py)
-    page = render_module_page(packet, "mod::pkg/core.py", diagram_text="flowchart LR\n  M[\"x\"]\n")
+    page = render_module_page(packet, "mod::pkg/core.py", diagram_text='flowchart LR\n  M["x"]\n')
 
     assert "```mermaid" in page and 'M["x"]' in page
 
@@ -100,21 +103,20 @@ def test_export_zip_is_atomic_and_skips_temp_files(mini_py, tmp_path):
 def _packet_with_paths(paths, *, layers=None):
     from codewiki.models import FileModel
 
-    files = [
-        FileModel(path=p, language="python", hash=p, symbols=[], imports=[], calls=[])
-        for p in paths
-    ]
+    files = [FileModel(path=p, language="python", hash=p, symbols=[], imports=[], calls=[]) for p in paths]
     result = build_graph(files)
     nodes = [
-        n.model_copy(update={"layer_id": layers[n.path]})
-        if layers and n.path in layers
-        else n
+        n.model_copy(update={"layer_id": layers[n.path]}) if layers and n.path in layers else n
         for n in result.nodes
     ]
-    layer_nodes = [
-        {"id": lid, "name": lid.removeprefix("layer::"), "order": i}
-        for i, lid in enumerate(dict.fromkeys(layers.values()))
-    ] if layers else []
+    layer_nodes = (
+        [
+            {"id": lid, "name": lid.removeprefix("layer::"), "order": i}
+            for i, lid in enumerate(dict.fromkeys(layers.values()))
+        ]
+        if layers
+        else []
+    )
     return packet_from_parts(
         title="t",
         layers=layer_nodes,
@@ -131,7 +133,7 @@ def test_site_index_links_point_to_rendered_html_not_raw_md():
     html_text = render_index_html(packet)
 
     assert 'href="modules/m_a.html"' in html_text, html_text
-    assert ".md\"" not in html_text.replace("diagnostics.html", ""), "不得再链接 .md 源码"
+    assert '.md"' not in html_text.replace("diagnostics.html", ""), "不得再链接 .md 源码"
 
 
 def test_site_index_links_are_collision_safe():
@@ -139,7 +141,9 @@ def test_site_index_links_are_collision_safe():
     packet = _packet_with_paths(["m/a-b.py", "m/a/b.py"])
     html_text = render_index_html(packet)
 
-    hrefs = [line.split('href="')[1].split('"')[0] for line in html_text.splitlines() if 'href="modules/' in line]
+    hrefs = [
+        line.split('href="')[1].split('"')[0] for line in html_text.splitlines() if 'href="modules/' in line
+    ]
     assert len(hrefs) == 2 and len(set(hrefs)) == 2, f"两条链接撞车: {hrefs}"
     for href in hrefs:
         assert href.endswith(".html")
@@ -157,7 +161,7 @@ def test_md_to_html_renders_known_subset():
         "## 上下游\n\n"
         "- [pkg/util.py](pkg_util.md) （import）\n"
         "- **上游**（谁用到我）\n\n"
-        "```mermaid\nflowchart LR\n  M[\"x\"]\n```\n\n"
+        '```mermaid\nflowchart LR\n  M["x"]\n```\n\n'
         "```python\nA = 1\n```\n\n"
         "[← 返回索引](../index.md)\n"
     )
@@ -183,7 +187,9 @@ def test_analyze_writes_module_html_pages(tmp_path):
     root = tmp_path / "repo"
     (root / "pkg").mkdir(parents=True)
     (root / "pkg" / "__init__.py").write_text("#\n", encoding="utf-8")
-    (root / "pkg" / "a.py").write_text("from pkg.b import B\n\nclass A:\n    def run(self):\n        return B()\n", encoding="utf-8")
+    (root / "pkg" / "a.py").write_text(
+        "from pkg.b import B\n\nclass A:\n    def run(self):\n        return B()\n", encoding="utf-8"
+    )
     (root / "pkg" / "b.py").write_text("class B:\n    pass\n", encoding="utf-8")
     out = tmp_path / "out"
 
@@ -262,21 +268,20 @@ def _packet_with_layers_and_edges(pairs, *, layers=None):
     from codewiki.models import Edge, EdgeType, FileModel
 
     paths = list(dict.fromkeys([p for pair in pairs for p in pair] + list((layers or {}).keys())))
-    files = [
-        FileModel(path=p, language="python", hash=p, symbols=[], imports=[], calls=[])
-        for p in paths
-    ]
+    files = [FileModel(path=p, language="python", hash=p, symbols=[], imports=[], calls=[]) for p in paths]
     result = build_graph(files)
     nodes = [
-        n.model_copy(update={"layer_id": layers[n.path]})
-        if layers and n.path in layers
-        else n
+        n.model_copy(update={"layer_id": layers[n.path]}) if layers and n.path in layers else n
         for n in result.nodes
     ]
-    layer_nodes = [
-        {"id": lid, "name": lid.removeprefix("layer::"), "order": i}
-        for i, lid in enumerate(dict.fromkeys(layers.values()))
-    ] if layers else []
+    layer_nodes = (
+        [
+            {"id": lid, "name": lid.removeprefix("layer::"), "order": i}
+            for i, lid in enumerate(dict.fromkeys(layers.values()))
+        ]
+        if layers
+        else []
+    )
     edges = [Edge(source=f"mod::{s}", target=f"mod::{d}", type=EdgeType.IMPORTS) for s, d in pairs]
     return packet_from_parts(
         title="t",
@@ -394,7 +399,7 @@ def test_hostile_module_name_cannot_break_out_of_the_href():
     packet = _packet_with_paths([hostile, "ok.py"])
     html_text = render_index_html(packet)
 
-    assert 'onerror=alert(1)' not in html_text.split("<code>")[0], "属性被提前闭合了"
+    assert "onerror=alert(1)" not in html_text.split("<code>")[0], "属性被提前闭合了"
     for chunk in html_text.split('href="')[1:]:
         href = chunk.split('"')[0]
         assert '"' not in href and "<" not in href, f"href 里出现危险字符: {href!r}"
@@ -403,9 +408,7 @@ def test_hostile_module_name_cannot_break_out_of_the_href():
 def test_hostile_layer_name_cannot_break_out_of_the_id():
     """层名来自被分析仓库的配置，同样不可信。"""
     hostile_name = 'x" onmouseover="alert(1)'
-    packet = _packet_with_paths(
-        ["m/a.py"], layers={"m/a.py": f"layer::{hostile_name}"}
-    )
+    packet = _packet_with_paths(["m/a.py"], layers={"m/a.py": f"layer::{hostile_name}"})
     html_text = render_index_html(packet)
 
     assert 'onmouseover="alert(1)"' not in html_text, "层 id 闭合了属性"

@@ -3,6 +3,7 @@
 图要能直接回答两个问题：**谁和谁成环**、**先动哪个能断环**。所以判据钉的是
 "环上边被标红加粗"与"断环建议指向环内被依赖最多的节点"。
 """
+
 from __future__ import annotations
 
 from codewiki.graph.analysis import Cycle
@@ -10,7 +11,11 @@ from codewiki.render.mermaid_cycle import render_all_cycles, render_cycle_diagra
 
 
 def test_cycle_diagram_highlights_edges_and_nodes():
-    cycle = Cycle(kind="module", members=["mod::a.py", "mod::b.py"], edges=[("mod::a.py", "mod::b.py"), ("mod::b.py", "mod::a.py")])
+    cycle = Cycle(
+        kind="module",
+        members=["mod::a.py", "mod::b.py"],
+        edges=[("mod::a.py", "mod::b.py"), ("mod::b.py", "mod::a.py")],
+    )
     text = render_cycle_diagram(cycle)
 
     assert text.startswith("flowchart LR")

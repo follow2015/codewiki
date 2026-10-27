@@ -14,6 +14,7 @@
 要产出数据包，但它不该依赖渲染层 —— 那会形成 ``graph → render`` 的环，让"渲染
 层随便改"和"导入层随便改"互相牵连。构造只需要 ``schemas`` 与版本号。
 """
+
 from __future__ import annotations
 
 import json
@@ -118,9 +119,7 @@ def packet_from_parts(
     ``generated_at`` 由调用方注入（``--timestamp`` / ``SOURCE_DATE_EPOCH``）；
     不给则取当前时间。可注入是逐字节比对验收的前提，见 ``codewiki.clock``。
     """
-    meta = DataPacket.new_meta(
-        title, repo_root=repo_root, repo_commit=repo_commit, generated_at=generated_at
-    )
+    meta = DataPacket.new_meta(title, repo_root=repo_root, repo_commit=repo_commit, generated_at=generated_at)
     meta.tool_version = __version__
     if provenance:
         meta.provenance = provenance

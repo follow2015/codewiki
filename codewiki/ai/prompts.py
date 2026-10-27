@@ -9,6 +9,7 @@
 系统提示里同时注入**既有层名**与**已有人工注解**（v2.4 强制要求），否则 AI 会
 产出与项目术语脱节的文案。
 """
+
 from __future__ import annotations
 
 from codewiki.ai.registry import manifest_lines
@@ -74,9 +75,8 @@ def agent_system_prompt(*, allow_shell: bool = False) -> str:
     用 ``replace`` 而不是 ``str.format``：提示词里满是 JSON 花括号，格式化模板要
     逐个大括号转义，改一次文案就可能漏一个。
     """
-    return _AGENT_SYSTEM_TEMPLATE.replace(
-        "__TOOLS__", "\n".join(manifest_lines(allow_shell=allow_shell))
-    )
+    return _AGENT_SYSTEM_TEMPLATE.replace("__TOOLS__", "\n".join(manifest_lines(allow_shell=allow_shell)))
+
 
 SEQUENCE_SYSTEM = """你是代码分析助手。请基于给定的**真实调用链**生成 Mermaid sequenceDiagram。
 

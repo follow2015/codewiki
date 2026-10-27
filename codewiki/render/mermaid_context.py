@@ -8,6 +8,7 @@
 
 节点 ID 与转义规则复用 :mod:`mermaid_macro`（同一套，避免两张图风格分叉）。
 """
+
 from __future__ import annotations
 
 from codewiki.graph.index import GraphIndex

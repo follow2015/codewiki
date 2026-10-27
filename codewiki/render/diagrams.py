@@ -8,6 +8,7 @@
   并**中断整轮**，一张坏图都不落盘（防止把渲染不了的图发到用户手里）；
 - AI 生成的图才走"回喂自修一次 → 退回纯文本"（阶段二实现）。
 """
+
 from __future__ import annotations
 
 import re
@@ -94,9 +95,7 @@ def render_all(
             result.files.append(target)
 
         index_path = diagrams_dir / SYSTEM_INDEX
-        index_path.write_text(
-            render_system_index(packet, pages, max_nodes=max_nodes), encoding="utf-8"
-        )
+        index_path.write_text(render_system_index(packet, pages, max_nodes=max_nodes), encoding="utf-8")
         result.files.append(index_path)
         stale_primary = diagrams_dir / SYSTEM_DIAGRAM
         if stale_primary.exists():

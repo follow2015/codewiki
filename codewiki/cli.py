@@ -3,6 +3,7 @@
 已落：``analyze``（纯静态、零网络）、``doctor``、``export``、``ai-annotate``、
 ``merge-annotations``。其余命令随阶段推进补齐，命令表与参数口径见设计文稿。
 """
+
 from __future__ import annotations
 
 import argparse
@@ -160,12 +161,9 @@ def _analyze(args: argparse.Namespace) -> int:
         models.append(model)
 
     layers_cfg = [
-        {"id": layer.id, "name": layer.name, "paths": layer.paths}
-        for layer in cfg.architecture.layers
+        {"id": layer.id, "name": layer.name, "paths": layer.paths} for layer in cfg.architecture.layers
     ]
-    min_confidence = (
-        args.min_confidence if args.min_confidence is not None else cfg.analysis.min_confidence
-    )
+    min_confidence = args.min_confidence if args.min_confidence is not None else cfg.analysis.min_confidence
     result = build_graph(
         models,
         min_confidence=min_confidence,
@@ -322,8 +320,7 @@ def _incremental_scope(
 
     if interrupted:
         return None, (
-            f"上一轮渲染未完成（{INCOMPLETE_MARKER} 仍在产物目录）⇒ 本轮全量重渲，"
-            "不复用可能残缺的页面"
+            f"上一轮渲染未完成（{INCOMPLETE_MARKER} 仍在产物目录）⇒ 本轮全量重渲，不复用可能残缺的页面"
         )
 
     if previous is None:
@@ -360,9 +357,7 @@ def _write_wiki(packet, out_dir: Path, *, diagrams_dir: Path, only_modules: set[
     from codewiki.models import NodeType
     from codewiki.render.diagrams import build_slug_map
 
-    slug_map = build_slug_map(
-        [n.path for n in packet.nodes if n.type == NodeType.MODULE and n.path]
-    )
+    slug_map = build_slug_map([n.path for n in packet.nodes if n.type == NodeType.MODULE and n.path])
 
     index = build_index(packet)
     for node in packet.nodes:
@@ -494,7 +489,10 @@ def _ai_annotate_cmd(args: argparse.Namespace) -> int:
     )
     write_back = args.write_back or cfg.ai.write_back
     if write_back not in _WRITE_BACK_POLICIES:
-        print(f"error: 未知 write-back 策略 {write_back!r}（可选 {sorted(_WRITE_BACK_POLICIES)}）", file=sys.stderr)
+        print(
+            f"error: 未知 write-back 策略 {write_back!r}（可选 {sorted(_WRITE_BACK_POLICIES)}）",
+            file=sys.stderr,
+        )
         return 2
 
     diagnostics: list[Diagnostic] = []
@@ -588,8 +586,10 @@ def _cycles_cmd(args: argparse.Namespace) -> int:
     cycles = find_module_cycles(packet) + find_layer_cycles(packet)
     diagnostics = cycles_to_diagnostics(cycles)
 
-    print(f"环 {len(cycles)} 个（模块 {sum(1 for c in cycles if c.kind == 'module')} / "
-          f"层级 {sum(1 for c in cycles if c.kind == 'layer')}）")
+    print(
+        f"环 {len(cycles)} 个（模块 {sum(1 for c in cycles if c.kind == 'module')} / "
+        f"层级 {sum(1 for c in cycles if c.kind == 'layer')}）"
+    )
     for diag in diagnostics:
         print(f"  [{diag.level}] {diag.code}: {diag.message}")
 
@@ -827,17 +827,13 @@ def build_parser() -> argparse.ArgumentParser:
     analyze.add_argument("--out", default="wiki-output", help="产物输出目录")
     analyze.add_argument("--backend", default="auto", help="auto | ast | treesitter | regex")
     analyze.add_argument("--exclude", action="append", help="追加跳过的目录名（可多次）")
-    analyze.add_argument(
-        "--config", help=f"配置路径（默认 <src>/{CONFIG_FILENAME}）"
-    )
+    analyze.add_argument("--config", help=f"配置路径（默认 <src>/{CONFIG_FILENAME}）")
     analyze.add_argument(
         "--trust-config",
         action="store_true",
         help="信任配置里的 [ai] base_url/model/write_back（默认忽略：该文件来自被分析仓库）",
     )
-    analyze.add_argument(
-        "--offline-asset", help="离线看图用的 mermaid.min.js（默认取包内自带的那份）"
-    )
+    analyze.add_argument("--offline-asset", help="离线看图用的 mermaid.min.js（默认取包内自带的那份）")
     analyze.add_argument("--no-cache", action="store_true", help="跳过 FileModel 增量缓存（强制全量解析）")
     analyze.add_argument(
         "--incremental",
@@ -876,7 +872,9 @@ def build_parser() -> argparse.ArgumentParser:
     annotate.add_argument("--cache-dir", help="AI 缓存根目录（默认 --src 或当前目录）")
     annotate.add_argument("--model", help="模型名（优先于 OPENAI_MODEL 与配置）")
     annotate.add_argument("--base-url", help="覆盖 [ai] base_url（本地 Ollama / vLLM 内网网关）")
-    annotate.add_argument("--write-back", choices=sorted(_WRITE_BACK_POLICIES), help="产出策略（默认 review-file）")
+    annotate.add_argument(
+        "--write-back", choices=sorted(_WRITE_BACK_POLICIES), help="产出策略（默认 review-file）"
+    )
     annotate.add_argument(
         "--trust-config",
         action="store_true",
@@ -924,7 +922,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     import_graph = sub.add_parser("import-graph", help="导入外部图谱（目前支持 graphify）")
     import_graph.add_argument("--from", dest="source", default="graphify", help="来源格式")
-    import_graph.add_argument("--input", required=True, help="图谱文件路径（如 graphify-out/<日期>/graph.json）")
+    import_graph.add_argument(
+        "--input", required=True, help="图谱文件路径（如 graphify-out/<日期>/graph.json）"
+    )
     import_graph.add_argument("--out", default="wiki-output", help="产物输出目录")
     import_graph.set_defaults(func=_import_graph_cmd)
 

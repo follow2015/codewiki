@@ -9,6 +9,7 @@
 真实的解析走 :func:`codewiki.analyzers.scip.mapper.map_index`，它以固定样本
 映射测试全绿为**准入口径**，不靠 Mock 蒙混。
 """
+
 from __future__ import annotations
 
 from pathlib import Path

@@ -7,6 +7,7 @@
 * ``merge-layers`` **绝不自动覆盖人工分层**：同名层跳过、paths 重叠直接不写
   并要求人工决定。
 """
+
 from __future__ import annotations
 
 import tomllib
@@ -94,7 +95,11 @@ def test_overlap_is_reported_and_blocks_writing(tmp_path):
     suggest = tmp_path / "suggested-layers.toml"
     suggest.write_text(
         render_suggested_layers(
-            [SuggestedLayer(name="api", paths=["api"], modules=["mod::api/a.py"], internal_edges=1, external_edges=0)]
+            [
+                SuggestedLayer(
+                    name="api", paths=["api"], modules=["mod::api/a.py"], internal_edges=1, external_edges=0
+                )
+            ]
         ),
         encoding="utf-8",
     )
@@ -116,7 +121,9 @@ def test_clean_merge_appends_after_existing(tmp_path):
     outcome = merge_layers(config, suggest)
     cfg = load_config(config)
 
-    assert [layer.name for layer in cfg.architecture.layers] == ["手工层", "api"], "人工层必须还在，建议层追加在后"
+    assert [layer.name for layer in cfg.architecture.layers] == ["手工层", "api"], (
+        "人工层必须还在，建议层追加在后"
+    )
     assert outcome.changed
 
 

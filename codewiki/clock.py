@@ -15,6 +15,7 @@
 非法取值**报错而不是静默退回真实时间**：设了 ``SOURCE_DATE_EPOCH`` 却悄悄忽略，
 等于让人以为产物可复现、实际不可复现 —— 这种"看起来成功了"的失败最难查。
 """
+
 from __future__ import annotations
 
 import os

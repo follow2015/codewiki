@@ -11,6 +11,7 @@
 归档物"两条前提 —— 缺一个，比对就只能退化成"排除某几个字段"，而排除式比对迟早
 漏掉真正该比的东西。
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -68,8 +69,7 @@ def _rename_file(repo: Path, flags: list[str]) -> None:
 
 def _change_layers(repo: Path, flags: list[str]) -> None:
     (repo / "codewiki.toml").write_text(
-        '[architecture]\n[[architecture.layers]]\nname = "核心层"\npaths = ["pkg"]\n'
-        'color = "#C8E6C9"\n',
+        '[architecture]\n[[architecture.layers]]\nname = "核心层"\npaths = ["pkg"]\ncolor = "#C8E6C9"\n',
         encoding="utf-8",
     )
 
@@ -151,9 +151,7 @@ def test_incremental_really_is_incremental(tmp_path, monkeypatch, capsys):
     capsys.readouterr()
     _analyze(repo, out, "--incremental")
 
-    note = next(
-        line for line in capsys.readouterr().out.splitlines() if line.startswith("增量渲染：")
-    )
+    note = next(line for line in capsys.readouterr().out.splitlines() if line.startswith("增量渲染："))
     reused = int(note.split("复用 ")[1].split(" ")[0])
     assert reused > 0, f"这轮退化成全量了（复用 0）：{note}"
 

@@ -14,6 +14,7 @@
 
 原则上 doctor **不发可能花钱/耗时的请求**，AI 连通性一律由 ``--probe`` 显式开启。
 """
+
 from __future__ import annotations
 
 import shutil
@@ -56,8 +57,10 @@ def render_report(checks: list[Check]) -> str:
     for check in checks:
         lines.append(f"{icon.get(check.level, '·')} {check.name}: {check.message}")
     lines.append("")
-    level = "error" if any(c.level == "error" for c in checks) else (
-        "warning" if any(c.level == "warning" for c in checks) else "ok"
+    level = (
+        "error"
+        if any(c.level == "error" for c in checks)
+        else ("warning" if any(c.level == "warning" for c in checks) else "ok")
     )
     lines.append(f"结论：{level}（doctor 不阻断，退出码恒 0）")
     return "\n".join(lines) + "\n"
@@ -169,11 +172,7 @@ def _check_ai(*, probe: bool) -> Check:
         pass
 
     model = resolve_model(cli_value=None, config_value=model)
-    note = (
-        f"；配置里的 {', '.join(ignored)} 已忽略（codewiki.toml 来自被分析仓库）"
-        if ignored
-        else ""
-    )
+    note = f"；配置里的 {', '.join(ignored)} 已忽略（codewiki.toml 来自被分析仓库）" if ignored else ""
 
     try:
         base_url, base_warning = resolve_base_url(cli_value=None, config_value=config_base)

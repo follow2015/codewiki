@@ -6,6 +6,7 @@
 stub 故意**按请求的模块动态作答**（而不是返回固定文案）：这样才能顺带验证
 "AI 注解的 target 与证据行号真的能对上"，固定文案会把串台问题藏起来。
 """
+
 from __future__ import annotations
 
 import json
@@ -125,21 +126,30 @@ def prepared(tmp_path, mini_py, stub_url, monkeypatch):
 def test_full_loop_analyze_annotate_merge_rerender(prepared, monkeypatch, capsys):
     monkeypatch.setenv("OPENAI_API_KEY", "sk-stub-not-a-real-key")
     monkeypatch.setenv("OPENAI_BASE_URL", prepared["stub_url"])
-    assert main(
-        [
-            "ai-annotate",
-            "--input", str(prepared["packet"]),
-            "--config", str(prepared["cfg"]),
-            "--src", str(prepared["src"]),
-            "--out", str(prepared["out"]),
-            "--cache-dir", str(prepared["cache"]),
-            "--top-n", "2",
-        ]
-    ) == 0
+    assert (
+        main(
+            [
+                "ai-annotate",
+                "--input",
+                str(prepared["packet"]),
+                "--config",
+                str(prepared["cfg"]),
+                "--src",
+                str(prepared["src"]),
+                "--out",
+                str(prepared["out"]),
+                "--cache-dir",
+                str(prepared["cache"]),
+                "--top-n",
+                "2",
+            ]
+        )
+        == 0
+    )
 
     suggest = prepared["out"] / "suggestions" / "annotations.suggest.toml"
     text = suggest.read_text(encoding="utf-8")
-    assert suggest.exists() and 'reviewed = false' in text and 'source = "ai"' in text
+    assert suggest.exists() and "reviewed = false" in text and 'source = "ai"' in text
     assert (prepared["out"] / "ai-audit.jsonl").exists()
 
     assert 'target = "mod::pkg/util.py"' not in text
@@ -153,7 +163,10 @@ def test_full_loop_analyze_annotate_merge_rerender(prepared, monkeypatch, capsys
     assert human and human[0].note.startswith("人工注解"), "人工注解被改写"
 
     out2 = prepared["out"].parent / "wiki-output2"
-    assert main(["analyze", "--src", str(prepared["src"]), "--out", str(out2), "--config", str(prepared["cfg"])]) == 0
+    assert (
+        main(["analyze", "--src", str(prepared["src"]), "--out", str(out2), "--config", str(prepared["cfg"])])
+        == 0
+    )
     packet = json.loads((out2 / "data" / "codewiki.json").read_text(encoding="utf-8"))
     sources = {a["source"] for a in packet["annotations"]}
     assert "ai" in sources and "human" in sources
@@ -165,12 +178,18 @@ def test_cache_avoids_second_paid_call(prepared, monkeypatch):
     monkeypatch.setenv("OPENAI_BASE_URL", prepared["stub_url"])
     args = [
         "ai-annotate",
-        "--input", str(prepared["packet"]),
-        "--config", str(prepared["cfg"]),
-        "--src", str(prepared["src"]),
-        "--out", str(prepared["out"]),
-        "--cache-dir", str(prepared["cache"]),
-        "--top-n", "2",
+        "--input",
+        str(prepared["packet"]),
+        "--config",
+        str(prepared["cfg"]),
+        "--src",
+        str(prepared["src"]),
+        "--out",
+        str(prepared["out"]),
+        "--cache-dir",
+        str(prepared["cache"]),
+        "--top-n",
+        "2",
     ]
     assert main(args) == 0
     audit_lines = (prepared["out"] / "ai-audit.jsonl").read_text(encoding="utf-8").strip().splitlines()
@@ -192,13 +211,20 @@ def test_ai_down_degrades_without_touching_static_products(prepared, monkeypatch
     code = main(
         [
             "ai-annotate",
-            "--input", str(prepared["packet"]),
-            "--config", str(prepared["cfg"]),
-            "--src", str(prepared["src"]),
-            "--out", str(prepared["out"]),
-            "--cache-dir", str(prepared["cache"]),
-            "--top-n", "1",
-            "--base-url", "http://127.0.0.1:1/v1",
+            "--input",
+            str(prepared["packet"]),
+            "--config",
+            str(prepared["cfg"]),
+            "--src",
+            str(prepared["src"]),
+            "--out",
+            str(prepared["out"]),
+            "--cache-dir",
+            str(prepared["cache"]),
+            "--top-n",
+            "1",
+            "--base-url",
+            "http://127.0.0.1:1/v1",
         ]
     )
     captured = capsys.readouterr()
@@ -229,18 +255,28 @@ def test_missing_model_is_reported(tmp_path, prepared, capsys, monkeypatch):
 def test_write_back_auto_merges_without_touching_human(prepared, monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "sk-stub-not-a-real-key")
     monkeypatch.setenv("OPENAI_BASE_URL", prepared["stub_url"])
-    assert main(
-        [
-            "ai-annotate",
-            "--input", str(prepared["packet"]),
-            "--config", str(prepared["cfg"]),
-            "--src", str(prepared["src"]),
-            "--out", str(prepared["out"]),
-            "--cache-dir", str(prepared["cache"]),
-            "--top-n", "1",
-            "--write-back", "auto",
-        ]
-    ) == 0
+    assert (
+        main(
+            [
+                "ai-annotate",
+                "--input",
+                str(prepared["packet"]),
+                "--config",
+                str(prepared["cfg"]),
+                "--src",
+                str(prepared["src"]),
+                "--out",
+                str(prepared["out"]),
+                "--cache-dir",
+                str(prepared["cache"]),
+                "--top-n",
+                "1",
+                "--write-back",
+                "auto",
+            ]
+        )
+        == 0
+    )
 
     cfg_after = load_config(prepared["cfg"])
     human = [a for a in cfg_after.annotations if a.target == "mod::pkg/util.py"]
@@ -251,8 +287,7 @@ def test_write_back_auto_merges_without_touching_human(prepared, monkeypatch):
 def test_annotate_bad_config_is_user_error(prepared, tmp_path, capsys):
     bad = tmp_path / "bad.toml"
     bad.write_text("[nope]\n", encoding="utf-8")
-    code = main(["ai-annotate", "--input", str(prepared["packet"]),
-                 "--config", str(bad), "--model", "m"])
+    code = main(["ai-annotate", "--input", str(prepared["packet"]), "--config", str(bad), "--model", "m"])
     err = capsys.readouterr().err
     assert code == 2, err
     assert "error:" in err and "nope" in err, "要给可执行的错误信息，不是 traceback"
@@ -261,8 +296,7 @@ def test_annotate_bad_config_is_user_error(prepared, tmp_path, capsys):
 def test_agent_bad_config_is_user_error(prepared, tmp_path, capsys):
     bad = tmp_path / "bad.toml"
     bad.write_text("[nope]\n", encoding="utf-8")
-    code = main(["agent", "--input", str(prepared["packet"]),
-                 "--config", str(bad)])
+    code = main(["agent", "--input", str(prepared["packet"]), "--config", str(bad)])
     err = capsys.readouterr().err
     assert code == 2, err
     assert "error:" in err and "nope" in err

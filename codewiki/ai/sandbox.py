@@ -17,6 +17,7 @@
 字符、不会触发第二个命令，但它说明这条命令来自拼接而非白名单意图，且 ``rm``
 不在白名单里会被第 1 层拦掉。两道都查是纵深，不是重复。
 """
+
 from __future__ import annotations
 
 import os
@@ -74,48 +75,147 @@ class _OptionPolicy:
 
 _GIT_PLAIN = frozenset(
     {
-        "--patch", "--stat", "--shortstat", "--numstat", "--name-only", "--name-status",
-        "--oneline", "--no-color", "--color", "--no-ext-diff", "--no-textconv", "--full-index",
-        "--no-merges", "--first-parent", "--all", "--graph", "--reverse", "--ignore-all-space",
-        "--ignore-blank-lines", "--no-renames", "--cached", "--staged", "--exit-code", "--quiet",
-        "--follow", "--no-decorate", "--short", "--porcelain", "--others", "--full-name",
-        "--directory", "--error-unmatch", "--exclude-standard", "--line-number",
-        "--files-with-matches", "--no-pager", "--invert-match", "--fixed-strings",
-        "--extended-regexp", "--perl-regexp", "--ignore-case", "--word-regexp", "--summary",
-        "--check", "--text", "--no-commit-id", "--binary", "--break-rewrites",
+        "--patch",
+        "--stat",
+        "--shortstat",
+        "--numstat",
+        "--name-only",
+        "--name-status",
+        "--oneline",
+        "--no-color",
+        "--color",
+        "--no-ext-diff",
+        "--no-textconv",
+        "--full-index",
+        "--no-merges",
+        "--first-parent",
+        "--all",
+        "--graph",
+        "--reverse",
+        "--ignore-all-space",
+        "--ignore-blank-lines",
+        "--no-renames",
+        "--cached",
+        "--staged",
+        "--exit-code",
+        "--quiet",
+        "--follow",
+        "--no-decorate",
+        "--short",
+        "--porcelain",
+        "--others",
+        "--full-name",
+        "--directory",
+        "--error-unmatch",
+        "--exclude-standard",
+        "--line-number",
+        "--files-with-matches",
+        "--no-pager",
+        "--invert-match",
+        "--fixed-strings",
+        "--extended-regexp",
+        "--perl-regexp",
+        "--ignore-case",
+        "--word-regexp",
+        "--summary",
+        "--check",
+        "--text",
+        "--no-commit-id",
+        "--binary",
+        "--break-rewrites",
     }
 )
 _GIT_VALUE = frozenset(
     {
-        "--abbrev", "--decorate", "--unified", "--pretty", "--format", "--date",
-        "--max-count", "--skip", "--since", "--until", "--author", "--committer",
-        "--grep", "--src-prefix", "--dst-prefix", "--diff-filter", "--max-depth",
+        "--abbrev",
+        "--decorate",
+        "--unified",
+        "--pretty",
+        "--format",
+        "--date",
+        "--max-count",
+        "--skip",
+        "--since",
+        "--until",
+        "--author",
+        "--committer",
+        "--grep",
+        "--src-prefix",
+        "--dst-prefix",
+        "--diff-filter",
+        "--max-depth",
     }
 )
 _GIT_SHORT_PLAIN = "psnliwvEFhHabRg"
 _GIT_SHORT_VALUE = "Um"
 
-_GREP_PLAIN = frozenset({"--color", "--no-color", "--null", "--count", "--files-with-matches", "--line-number"})
+_GREP_PLAIN = frozenset(
+    {"--color", "--no-color", "--null", "--count", "--files-with-matches", "--line-number"}
+)
 _GREP_VALUE = frozenset({"--include", "--exclude", "--exclude-dir", "--max-count", "--label"})
 _GREP_SHORT_PLAIN = "rnivwEFlchHoqsabPx"
 _GREP_SHORT_VALUE = "ABCme"
 
 _FIND_PLAIN = frozenset(
-    {"-print", "-print0", "-depth", "-L", "-P", "-H", "-not", "-a", "-o", "-empty", "-prune", "-xdev", "-quit"}
+    {
+        "-print",
+        "-print0",
+        "-depth",
+        "-L",
+        "-P",
+        "-H",
+        "-not",
+        "-a",
+        "-o",
+        "-empty",
+        "-prune",
+        "-xdev",
+        "-quit",
+    }
 )
 _FIND_VALUE = frozenset(
     {
-        "-name", "-iname", "-lname", "-type", "-path", "-ipath", "-maxdepth", "-mindepth",
-        "-size", "-mtime", "-mmin", "-ctime", "-atime", "-newermt", "-perm", "-user", "-group",
-        "-links", "-samefile-name",
+        "-name",
+        "-iname",
+        "-lname",
+        "-type",
+        "-path",
+        "-ipath",
+        "-maxdepth",
+        "-mindepth",
+        "-size",
+        "-mtime",
+        "-mmin",
+        "-ctime",
+        "-atime",
+        "-newermt",
+        "-perm",
+        "-user",
+        "-group",
+        "-links",
+        "-samefile-name",
     }
 )
 
 _VIEWER_PLAIN = frozenset(
     {
-        "--color", "--no-color", "--noreport", "--no-report", "--dirsfirst", "--all",
-        "--almost-all", "--ignore-backups", "--escape", "--literal", "--quote-name",
-        "--reverse", "--recursive", "--human-readable", "--si", "--inode", "--identity",
+        "--color",
+        "--no-color",
+        "--noreport",
+        "--no-report",
+        "--dirsfirst",
+        "--all",
+        "--almost-all",
+        "--ignore-backups",
+        "--escape",
+        "--literal",
+        "--quote-name",
+        "--reverse",
+        "--recursive",
+        "--human-readable",
+        "--si",
+        "--inode",
+        "--identity",
     }
 )
 
@@ -223,18 +323,14 @@ def _check_option(arg: str, policy: _OptionPolicy, *, root: Path, program: str) 
                 _jail_check(embedded, root=root)
                 return False
             raise ShellDenied(f"{program} 长选项不在白名单: {arg!r}")
-        raise ShellDenied(
-            f"{program} 长选项不在白名单: {arg!r}（选项内嵌路径曾是越狱通道，一律走白名单）"
-        )
+        raise ShellDenied(f"{program} 长选项不在白名单: {arg!r}（选项内嵌路径曾是越狱通道，一律走白名单）")
 
     letters = arg[1:]
     if policy.viewer:
         deref = _VIEWER_DEREF_SHORT.get(program, frozenset())
         hit = sorted({ch for ch in letters if ch in deref})
         if hit:
-            raise ShellDenied(
-                f"{program} 的 -{''.join(hit)} 会跟随符号链接（可读到仓库外的内容）：已拒绝"
-            )
+            raise ShellDenied(f"{program} 的 -{''.join(hit)} 会跟随符号链接（可读到仓库外的内容）：已拒绝")
         return False
     if not re.fullmatch(r"[A-Za-z0-9]+", letters):
         raise ShellDenied(f"{program} 短旗标形状非法: {arg!r}")
@@ -301,7 +397,9 @@ def check_command(command: str, *, repo_root: Path) -> list[str]:
         if not arg.startswith("-"):
             if program == "git" and not subcommand_seen:
                 if arg not in (allowed_sub or set()):
-                    raise ShellDenied(f"{program} 子命令不在白名单: {arg!r}（允许: {sorted(allowed_sub or set())}）")
+                    raise ShellDenied(
+                        f"{program} 子命令不在白名单: {arg!r}（允许: {sorted(allowed_sub or set())}）"
+                    )
                 subcommand_seen = True
                 continue
             _jail_check(arg, root=root)
@@ -334,9 +432,10 @@ def execute_shell(
     argv = check_command(command, repo_root=repo_root)
     root = repo_root.resolve()
 
-    if argv[0] == "git" and next(
-        (a for a in argv[1:] if not a.startswith("-")), None
-    ) in _GIT_FORCE_NO_DIFF_SUBCOMMANDS:
+    if (
+        argv[0] == "git"
+        and next((a for a in argv[1:] if not a.startswith("-")), None) in _GIT_FORCE_NO_DIFF_SUBCOMMANDS
+    ):
         argv = [*argv, "--no-ext-diff", "--no-textconv"]
 
     if argv[0] == "grep":

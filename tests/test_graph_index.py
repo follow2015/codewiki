@@ -4,6 +4,7 @@
 ``dependency_edges`` 漏边、``module_of`` 认不出符号归属、置信度过滤失效，
 产物会静默缺内容 —— 而图照样画得出来。所以索引的每个查询都要单独钉住。
 """
+
 from __future__ import annotations
 
 from codewiki.graph.index import build_index
@@ -53,7 +54,13 @@ def test_dependency_edges_respects_min_confidence():
         [_module("a.py"), _module("b.py"), _module("c.py")],
         [
             Edge(source="mod::a.py", target="mod::b.py", type=EdgeType.CALLS, confidence=CONF_STATIC),
-            Edge(source="mod::a.py", target="mod::c.py", type=EdgeType.CALLS, confidence=CONF_DYNAMIC, static=False),
+            Edge(
+                source="mod::a.py",
+                target="mod::c.py",
+                type=EdgeType.CALLS,
+                confidence=CONF_DYNAMIC,
+                static=False,
+            ),
         ],
     )
     index = build_index(packet)

@@ -7,6 +7,7 @@
 2. 提示词注入**必须被标记**（不是必须被理解）：工具只负责把风险摆到明面上，
    由调用方决定丢弃还是标注。
 """
+
 from __future__ import annotations
 
 import json

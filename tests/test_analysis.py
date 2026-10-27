@@ -9,6 +9,7 @@
 
 结论一律要能落到具体节点：环给成员、God Node 给度数与占比、影响给半径。
 """
+
 from __future__ import annotations
 
 import pytest
@@ -121,8 +122,9 @@ def test_external_nodes_never_become_god_nodes():
     edges = [_edge("a.py", "typing"), _edge("a.py", "os")]
     assert god_node_diagnostics(_packet(nodes, edges)) == []
     ranked = hotspots(_packet(nodes, edges), top_n=10)
-    assert all(not h.node_id.startswith("mod::ref::") for h in ranked), \
+    assert all(not h.node_id.startswith("mod::ref::") for h in ranked), (
         "外部引用节点不该进入热点列表（它不是项目模块）"
+    )
     hot = ranked[0]
     assert hot.node_id == "mod::a.py"
     assert hot.cross_layer_ratio == 0.0, f"外部引用被算成跨层了：{hot}"

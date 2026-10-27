@@ -4,6 +4,7 @@
 而 Windows 控制台默认 cp1252 一个汉字都编不出来 —— 这类缺陷只在异平台上炸，
 本地 macOS/UTF-8 跑一万遍也看不见。所以用 ascii 编码的假流把条件造出来。
 """
+
 from __future__ import annotations
 
 import io

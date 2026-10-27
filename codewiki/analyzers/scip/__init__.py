@@ -9,6 +9,7 @@
 刻意不引入 PyPI 上的 ``scip`` 包：那是细胞图像处理库（GPL），与 SCIP 代码索引
 格式无关（设计 v2.5 已订正）。
 """
+
 from __future__ import annotations
 
 __all__ = ["mapper", "mock", "pb"]

@@ -9,6 +9,7 @@
 
 拓扑 hash 默认**关**（§5.5 明确为可选优化项，不作为阶段二验收门槛）。
 """
+
 from __future__ import annotations
 
 import hashlib

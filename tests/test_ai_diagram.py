@@ -8,6 +8,7 @@
 * 自修**只有一次**（无限自修会把 token 烧光，而且越修越歪）；
 * AI 不可用时是 info/warning 降级，不是错误 —— 静态产物照常产出。
 """
+
 from __future__ import annotations
 
 from codewiki.ai.client import LLMUnavailable

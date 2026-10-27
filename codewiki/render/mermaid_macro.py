@@ -13,6 +13,7 @@
 节点 ID 一律用 ``n<hash>``（Mermaid 的 ID 只允许字母数字下划线），真实名字放
 Label —— 这样中文路径、点号、斜杠都不会破坏语法。
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -83,9 +84,7 @@ def render_system_context(
         members = [m for m in modules if m.layer_id == layer.id]
         for module in _sorted_by_weight(packet, members):
             label = escape_label(module.path or module.id)
-            lines.append(
-                f'    {node_id(module.id)}["{_annotation_label(packet, module.id, label)}"]'
-            )
+            lines.append(f'    {node_id(module.id)}["{_annotation_label(packet, module.id, label)}"]')
         lines.append("  end")
 
     unlayered = [m for m in modules if not m.layer_id or m.layer_id == UNLAYERED_LAYER_ID]
@@ -93,9 +92,7 @@ def render_system_context(
         lines.append(f'  subgraph {node_id(UNLAYERED_LAYER_ID)}["{UNLAYERED_LABEL}"]')
         for module in _sorted_by_weight(packet, unlayered):
             label = escape_label(module.path or module.id)
-            lines.append(
-                f'    {node_id(module.id)}["{_annotation_label(packet, module.id, label)}"]'
-            )
+            lines.append(f'    {node_id(module.id)}["{_annotation_label(packet, module.id, label)}"]')
         lines.append("  end")
 
     for edge in packet.edges:

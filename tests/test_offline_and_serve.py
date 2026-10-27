@@ -9,6 +9,7 @@
 3. **大图分包**：超限时**不产出单张巨型图**（渲染必崩），改出分页 + 索引页，
    索引要给出下钻链接（否则读者只能靠猜翻文件）。
 """
+
 from __future__ import annotations
 
 import threading

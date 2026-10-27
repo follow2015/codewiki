@@ -12,6 +12,7 @@
 写入策略：只做**文本级追加/删块**，不整体重写用户的 TOML —— 整体重写会丢注释、
 重排字段、把用户手写的排版弄乱，那比冲突更让人恼火。
 """
+
 from __future__ import annotations
 
 import tomllib
@@ -108,8 +109,12 @@ def plan_merge(
 
         outcome.added.append(suggestion)
         outcome.conflicts.append(
-            {"target": suggestion.target, "existing_note": current[0].note, "incoming_note": suggestion.note,
-             "resolved": "force"}
+            {
+                "target": suggestion.target,
+                "existing_note": current[0].note,
+                "incoming_note": suggestion.note,
+                "resolved": "force",
+            }
         )
     return outcome
 
@@ -178,7 +183,9 @@ def render_merge_report(outcome: MergeOutcome) -> str:
         f"跳过(受保护) {len(outcome.protected)} 条 / 冲突 {len(outcome.conflicts)} 条"
     ]
     for item in outcome.conflicts:
-        lines.append(f"  ⚠ 冲突 {item['target']}：已存在「{item['existing_note'][:40]}…」，建议为「{item['incoming_note'][:40]}…」")
+        lines.append(
+            f"  ⚠ 冲突 {item['target']}：已存在「{item['existing_note'][:40]}…」，建议为「{item['incoming_note'][:40]}…」"
+        )
         lines.append("     未自动覆盖；确认无误后加 --force 重跑")
     for target in outcome.protected:
         lines.append(f"  ⏭ 跳过 {target}：已有人工/已审阅注解（受保护，--force 也不动）")

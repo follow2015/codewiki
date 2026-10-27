@@ -8,6 +8,7 @@
 3. **自污染**：缓存写在仓库内（`.codewiki/`），必须被扫描排除 —— 否则第二轮
    开始图谱里会冒出几千个缓存文件"模块"（第一轮永远测不出来）。
 """
+
 from __future__ import annotations
 
 from pathlib import Path

@@ -7,6 +7,7 @@
 - 修改 schema 必须同批改 golden，并在提交说明里写清影响面（渲染层 / AI 层 /
   导入适配器都是它的消费者）。
 """
+
 from __future__ import annotations
 
 import json

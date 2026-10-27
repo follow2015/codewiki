@@ -8,6 +8,7 @@
    ``~<sha1_8>``；同样的输入集合两轮渲染结果一致 —— 增量渲染依赖这一点）；
 3. 页面文件名、index 链接、页内互链必须同源（同一个 map）。
 """
+
 from __future__ import annotations
 
 from codewiki.cli import main

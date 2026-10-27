@@ -6,6 +6,7 @@
 * 换模型 ⇒ 键变（否则两个模型的答案混着用，成本与质量都算不清）；
 * 换提示词版本 ⇒ 键变（否则改了 Prompt 却命中旧缓存，表现为"改了没效果"）。
 """
+
 from __future__ import annotations
 
 from codewiki.ai.cache import (

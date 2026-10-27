@@ -9,6 +9,7 @@
 另外三条"增量该退出"的情形也要钉住（否则"开了增量却没生效/退化成全量"会变成
 又一个静默问题）：无上一轮快照、快照损坏、分层或注解有变化。
 """
+
 from __future__ import annotations
 
 import json
@@ -104,7 +105,10 @@ def test_config_change_forces_full_rerender(tmp_path, capsys):
         '[[architecture.layers]]\nname = "L2"\npaths = ["pkg"]\n',
         encoding="utf-8",
     )
-    assert main(["analyze", "--src", str(repo), "--out", str(out), "--config", str(changed), "--incremental"]) == 0
+    assert (
+        main(["analyze", "--src", str(repo), "--out", str(out), "--config", str(changed), "--incremental"])
+        == 0
+    )
     assert "分层定义已变化" in _note(capsys)
 
 
@@ -139,9 +143,10 @@ def test_min_confidence_change_forces_full_rerender(tmp_path, capsys):
     assert main(["analyze", "--src", str(repo), "--out", str(out), "--config", str(loose)]) == 0
     page = _with_sentinel(out)
 
-    assert main(
-        ["analyze", "--src", str(repo), "--out", str(out), "--config", str(strict), "--incremental"]
-    ) == 0
+    assert (
+        main(["analyze", "--src", str(repo), "--out", str(out), "--config", str(strict), "--incremental"])
+        == 0
+    )
 
     note = _note(capsys)
     assert "全量渲染" in note

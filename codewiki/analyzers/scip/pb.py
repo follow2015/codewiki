@@ -12,6 +12,7 @@
 支持范围刻意做窄：varint / 64bit-fixed / length-delimited / 32bit-fixed，
 **不支持** group（已废弃）与 zigzag 之外的特殊编码（SCIP 用不到）。
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass

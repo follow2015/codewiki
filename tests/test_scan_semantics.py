@@ -8,6 +8,7 @@
 3. 无可用后端的语言必须显式诊断（注释声称"诊断里体现"但实际没有）；
 4. ``--no-cache`` 下解析失败必须可见（stats 诊断此前只在有缓存时输出）。
 """
+
 from __future__ import annotations
 
 import json
@@ -39,9 +40,7 @@ def test_cli_exclude_merges_with_config_exclude(tmp_path):
     """CLI --exclude 与配置 exclude 是并集，不是替换（help 写的是"追加"）。"""
     root = tmp_path / "repo"
     _mk_repo(root)
-    (root / "codewiki.toml").write_text(
-        '[analysis]\nexclude = ["skipcfg"]\n', encoding="utf-8"
-    )
+    (root / "codewiki.toml").write_text('[analysis]\nexclude = ["skipcfg"]\n', encoding="utf-8")
     out = tmp_path / "out"
 
     assert main(["analyze", "--src", str(root), "--out", str(out)]) == 0

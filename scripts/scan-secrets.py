@@ -21,6 +21,7 @@ scan-secrets.py — 机密信息扫描器（移植自 ipip 同名脚本，按 co
 
 退出码：0 通过 | 1 发现机密 | 2 用法错误
 """
+
 import re
 import sys
 from pathlib import Path
@@ -28,9 +29,11 @@ from pathlib import Path
 RULES: list[tuple[str, re.Pattern, str]] = [
     (
         "IP_ADDR",
-        re.compile(r"\b(?!0\.0\.0\.0|127\.0\.0\.1|255\.255\.255\.255|localhost)"
-                   r"(?:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.){3}"
-                   r"(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\b"),
+        re.compile(
+            r"\b(?!0\.0\.0\.0|127\.0\.0\.1|255\.255\.255\.255|localhost)"
+            r"(?:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.){3}"
+            r"(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\b"
+        ),
         "IP 地址（可能是内网/公网 IP）",
     ),
     (
@@ -96,12 +99,20 @@ _NAMESPACED_KEY_ONLY = re.compile(
 )
 
 SAFE_IPS = {
-    "0.0.0.0", "127.0.0.1", "255.255.255.255",
-    "1.1.1.1", "8.8.8.8", "8.8.4.4",
+    "0.0.0.0",
+    "127.0.0.1",
+    "255.255.255.255",
+    "1.1.1.1",
+    "8.8.8.8",
+    "8.8.4.4",
     "1.2.3.4",
     "239.0.0.1",
-    "255.255.255.0", "255.255.0.0", "255.0.0.0",
-    "255.255.252.0", "255.255.248.0", "255.255.240.0",
+    "255.255.255.0",
+    "255.255.0.0",
+    "255.0.0.0",
+    "255.255.252.0",
+    "255.255.248.0",
+    "255.255.240.0",
 }
 
 
@@ -182,7 +193,9 @@ def scan_file(path: Path, text: str | None = None) -> list[tuple[int, str, str, 
 
                 if rule_id == "PASSWORD_ASSIGN":
                     placeholder = m.group(0).lower()
-                    if any(p in placeholder for p in ("your", "xxx", "change", "example", "<", "placeholder")):
+                    if any(
+                        p in placeholder for p in ("your", "xxx", "change", "example", "<", "placeholder")
+                    ):
                         continue
                     tail = _VALUE_TAIL.search(m.group(0))
                     value = tail.group(1).strip() if tail else ""
@@ -196,9 +209,10 @@ def scan_file(path: Path, text: str | None = None) -> list[tuple[int, str, str, 
                         if bare == m.group(1):
                             continue
                         value, tail = bare, None
-                    if tail and _INTERP_ONLY.match(value) and (
-                        not _BRACE_SEGMENT.search(value)
-                        or _FSTRING_PREFIX.search(line)
+                    if (
+                        tail
+                        and _INTERP_ONLY.match(value)
+                        and (not _BRACE_SEGMENT.search(value) or _FSTRING_PREFIX.search(line))
                     ):
                         continue
                     if tail and value.startswith("$("):

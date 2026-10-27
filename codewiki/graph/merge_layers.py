@@ -13,6 +13,7 @@
 3. **建议层带来源注释**：``# source: suggested``，便于日后回溯哪些是人定的、
    哪些是算法给的。
 """
+
 from __future__ import annotations
 
 import tomllib
@@ -49,9 +50,7 @@ def plan_merge_layers(suggested: list[LayerSpec], existing: list[LayerSpec]) -> 
         for current in existing:
             overlap = _path_overlap(layer.paths, current.paths)
             if overlap:
-                outcome.overlaps.append(
-                    {"name": layer.name, "with": current.name, "paths": sorted(overlap)}
-                )
+                outcome.overlaps.append({"name": layer.name, "with": current.name, "paths": sorted(overlap)})
         outcome.added.append(layer)
     return outcome
 
@@ -134,7 +133,9 @@ def render_layer_merge_report(outcome: LayerMergeOutcome) -> str:
         f"新增 {len(outcome.added)} 层 / 跳过 {len(outcome.skipped)} 层 / 重叠 {len(outcome.overlaps)} 处"
     ]
     for item in outcome.overlaps:
-        lines.append(f"  ⚠ 「{item['name']}」与既有层「{item['with']}」paths 重叠：{', '.join(item['paths'])}")
+        lines.append(
+            f"  ⚠ 「{item['name']}」与既有层「{item['with']}」paths 重叠：{', '.join(item['paths'])}"
+        )
         lines.append("     未写入配置：请人工决定归属后再合并")
     for name in outcome.skipped:
         lines.append(f"  ⏭ 跳过「{name}」：已存在同名层（人工层优先）")

@@ -10,6 +10,7 @@
 
 本模块刻意不写文件 —— 落盘由调用方决定，这样"坏图不落盘"是可测的纯函数行为。
 """
+
 from __future__ import annotations
 
 import re
@@ -37,11 +38,7 @@ class DiagramResult:
 
 def strip_fences(text: str) -> str:
     """去掉模型爱加的代码围栏（Mermaid 文件本身不需要）。"""
-    lines = [
-        line
-        for line in (text or "").splitlines()
-        if not line.strip().startswith("```")
-    ]
+    lines = [line for line in (text or "").splitlines() if not line.strip().startswith("```")]
     return "\n".join(lines).strip()
 
 
@@ -61,7 +58,12 @@ def generate_sequence_diagram(
     if client is None:
         result.skipped = True
         result.diagnostics.append(
-            Diagnostic(level="info", code="AI_DIAGRAM_SKIPPED", message="未配置 AI，跳过时序图（纯静态产物不受影响）", where=where)
+            Diagnostic(
+                level="info",
+                code="AI_DIAGRAM_SKIPPED",
+                message="未配置 AI，跳过时序图（纯静态产物不受影响）",
+                where=where,
+            )
         )
         return result
     if not chain:
@@ -73,10 +75,20 @@ def generate_sequence_diagram(
 
     user_prompt = render_sequence_user(chain=chain)
     try:
-        reply = client.chat([ChatMessage(role="system", content=SEQUENCE_SYSTEM), ChatMessage(role="user", content=user_prompt)])
+        reply = client.chat(
+            [
+                ChatMessage(role="system", content=SEQUENCE_SYSTEM),
+                ChatMessage(role="user", content=user_prompt),
+            ]
+        )
     except LLMError as exc:
         result.diagnostics.append(
-            Diagnostic(level="warning", code="AI_UNAVAILABLE", message=f"时序图生成失败（AI 不可用）: {exc}", where=where)
+            Diagnostic(
+                level="warning",
+                code="AI_UNAVAILABLE",
+                message=f"时序图生成失败（AI 不可用）: {exc}",
+                where=where,
+            )
         )
         return result
 
@@ -90,7 +102,9 @@ def generate_sequence_diagram(
         repair = client.chat(
             [
                 ChatMessage(role="system", content=SEQUENCE_SYSTEM),
-                ChatMessage(role="user", content=render_repair_user(issues=_issues_text(issues), diagram=text)),
+                ChatMessage(
+                    role="user", content=render_repair_user(issues=_issues_text(issues), diagram=text)
+                ),
             ]
         )
     except LLMError as exc:
@@ -115,7 +129,8 @@ def generate_sequence_diagram(
         Diagnostic(
             level="warning",
             code="AI_DIAGRAM_INVALID",
-            message="时序图两次均未通过校验门，已退回纯文本（不交付坏图）: " + "; ".join(_issues_text(issues2)),
+            message="时序图两次均未通过校验门，已退回纯文本（不交付坏图）: "
+            + "; ".join(_issues_text(issues2)),
             where=where,
         )
     )

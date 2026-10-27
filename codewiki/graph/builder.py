@@ -12,6 +12,7 @@
    不动点迭代直到收敛；成环则中止该链并记低置信动态边。
 3. **环检测**：文件级用 SCC，层级级用 simple_cycles（分层出现环 = 严重诊断）。
 """
+
 from __future__ import annotations
 
 import itertools
@@ -153,9 +154,7 @@ class GraphBuilder:
                 table.setdefault(symbol.name, sid)
             self._module_symbols[file.path] = table
             for symbol in file.symbols:
-                self._global_names.setdefault(symbol.name, []).append(
-                    symbol_id(file.path, symbol.qualname)
-                )
+                self._global_names.setdefault(symbol.name, []).append(symbol_id(file.path, symbol.qualname))
 
     def _exported_names(self, file: FileModel) -> dict[str, str]:
         """模块的对外可见名 → symbol id（含 ``__all__`` 决定公开面）。"""
@@ -282,9 +281,7 @@ class GraphBuilder:
                             weight=1,
                         )
                     else:
-                        self._edge(
-                            mid, self._external(imp.module or ""), EdgeType.IMPORTS, alias=imp.alias
-                        )
+                        self._edge(mid, self._external(imp.module or ""), EdgeType.IMPORTS, alias=imp.alias)
                     continue
 
                 source = self._exports.get(file.path, {}).get(imp.alias or imp.name or "")
@@ -306,9 +303,7 @@ class GraphBuilder:
                         )
                     )
                 else:
-                    self._edge(
-                        mid, self._external(imp.module or ""), EdgeType.IMPORTS, alias=imp.alias
-                    )
+                    self._edge(mid, self._external(imp.module or ""), EdgeType.IMPORTS, alias=imp.alias)
 
     def _resolve_calls(self, files: list[FileModel]) -> None:
         for file in files:
@@ -463,9 +458,7 @@ class GraphBuilder:
                 )
             )
         self.edges = kept
-        self._edge_index = {
-            (e.source, e.target, e.type, e.alias, e.static, e.confidence): e for e in kept
-        }
+        self._edge_index = {(e.source, e.target, e.type, e.alias, e.static, e.confidence): e for e in kept}
 
     def _add(self, node: Node) -> None:
         self.nodes.setdefault(node.id, node)
@@ -473,8 +466,14 @@ class GraphBuilder:
     def _edge(self, source: str, target: str, etype: EdgeType, **kwargs) -> None:
         if source == target:
             return
-        key = (source, target, etype, kwargs.get("alias"), kwargs.get("static", True),
-               kwargs.get("confidence", CONF_STATIC))
+        key = (
+            source,
+            target,
+            etype,
+            kwargs.get("alias"),
+            kwargs.get("static", True),
+            kwargs.get("confidence", CONF_STATIC),
+        )
         existing = self._edge_index.get(key)
         if existing is not None:
             existing.weight += int(kwargs.get("weight", 1))
@@ -525,7 +524,9 @@ class GraphBuilder:
                 base = base.rsplit("/", 1)[0] if "/" in base else ""
             if not rest:
                 return self._probe_candidate(f"{base}/__init__.py") if base else None
-            return self._probe_candidate("/".join([base, *rest.split(".")]) if base else rest.replace(".", "/"))
+            return self._probe_candidate(
+                "/".join([base, *rest.split(".")]) if base else rest.replace(".", "/")
+            )
 
         parts = dotted.split(".")
         candidates = []
@@ -611,14 +612,14 @@ class GraphBuilder:
             if self._ambiguous_reported < 100:
                 self._ambiguous_reported += 1
                 self.diagnostics.append(
-                Diagnostic(
-                    level="info",
-                    code="CALL_AMBIGUOUS",
-                    message=f"同名符号 {name!r} 有 {len(candidates)} 个候选，无接收者类型信息，不绑定: "
-                    + ", ".join(sorted(candidates)),
-                    where=module_path,
+                    Diagnostic(
+                        level="info",
+                        code="CALL_AMBIGUOUS",
+                        message=f"同名符号 {name!r} 有 {len(candidates)} 个候选，无接收者类型信息，不绑定: "
+                        + ", ".join(sorted(candidates)),
+                        where=module_path,
+                    )
                 )
-            )
             return None
         return candidates[0]
 
@@ -651,9 +652,7 @@ def build_graph(
     root_package: str | None = None,
 ) -> BuildResult:
     """便捷入口：由 FileModel 列表构建图谱。"""
-    builder = GraphBuilder(
-        min_confidence=min_confidence, layers=layers, root_package=root_package
-    )
+    builder = GraphBuilder(min_confidence=min_confidence, layers=layers, root_package=root_package)
     result = builder.build(files)
     result.diagnostics.extend(builder.diagnostics_for_unlayered())
     return result

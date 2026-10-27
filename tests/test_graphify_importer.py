@@ -8,6 +8,7 @@
 1. 结构不符必须**报错失败**（``GraphifyFormatError``），不是跳过；
 2. 认不出的 relation 要**列出来**（诊断），不是硬塞成 IMPORTS。
 """
+
 from __future__ import annotations
 
 import json
