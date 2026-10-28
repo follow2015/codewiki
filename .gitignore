@@ -19,6 +19,13 @@ wiki-output/
 # 本地临时工作目录（验证脚本、参考实现副本等）：不入库
 .cw-tmp/
 
+# AI 外置推理队列（ai-annotate --deferred 的 requests/answers）：运行时产物
+# 里面是待问内容与逐条作答，随仓库分发既无意义、也容易带上业务代码片段
+.ai-queue/
+
+# AI 标注建议（*.suggest.toml）：reviewed 前只是候选，合并进 codewiki.toml 才算数
+*.suggest.toml
+
 # macOS 垃圾文件
 .DS_Store
 

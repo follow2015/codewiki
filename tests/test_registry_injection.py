@@ -106,7 +106,7 @@ def test_run_ignores_the_process_registry(tmp_path, mini_py, monkeypatch):
 
     out = tmp_path / "out"
 
-    assert run(AnalyzeRequest(src=mini_py, out=out, timestamp="0")) == 0
+    assert run(AnalyzeRequest(src=mini_py, out=out, timestamp="0", no_cache=True)) == 0
     assert (out / "data" / "codewiki.json").is_file()
 
 

@@ -18,6 +18,8 @@ from codewiki.config import load_config
 
 FIXTURES = "tests/fixtures"
 
+NO_CACHE = ["--no-cache"]
+
 
 @pytest.fixture
 def cyclic_py():
@@ -29,13 +31,13 @@ def cyclic_py():
 @pytest.fixture
 def prepared(tmp_path, mini_py):
     out = tmp_path / "wiki-output"
-    assert main(["analyze", "--src", str(mini_py), "--out", str(out)]) == 0
+    assert main(["analyze", "--src", str(mini_py), "--out", str(out), *NO_CACHE]) == 0
     return out
 
 
 def test_cycles_reports_the_cycle_and_writes_diagram(cyclic_py, tmp_path, capsys):
     out = tmp_path / "out"
-    assert main(["analyze", "--src", str(cyclic_py), "--out", str(out)]) == 0
+    assert main(["analyze", "--src", str(cyclic_py), "--out", str(out), *NO_CACHE]) == 0
 
     code = main(["cycles", "--input", str(out / "data" / "codewiki.json"), "--out", str(out)])
     captured = capsys.readouterr()
@@ -58,8 +60,8 @@ def test_missing_packet_is_user_error(tmp_path, capsys):
 def test_diff_between_two_snapshots(cyclic_py, tmp_path, capsys):
     base = tmp_path / "base"
     head = tmp_path / "head"
-    assert main(["analyze", "--src", str(cyclic_py), "--out", str(base)]) == 0
-    assert main(["analyze", "--src", str(cyclic_py), "--out", str(head)]) == 0
+    assert main(["analyze", "--src", str(cyclic_py), "--out", str(base), *NO_CACHE]) == 0
+    assert main(["analyze", "--src", str(cyclic_py), "--out", str(head), *NO_CACHE]) == 0
 
     packet_path = head / "data" / "codewiki.json"
     data = json.loads(packet_path.read_text(encoding="utf-8"))
@@ -100,7 +102,7 @@ def test_suggest_layers_then_merge_layers(prepared, tmp_path, capsys):
 def test_full_pipeline_smoke(mini_py, tmp_path):
     """analyze → cycles → suggest-layers → export 全链路不炸（端到端冒烟）。"""
     out = tmp_path / "wiki-output"
-    assert main(["analyze", "--src", str(mini_py), "--out", str(out)]) == 0
+    assert main(["analyze", "--src", str(mini_py), "--out", str(out), *NO_CACHE]) == 0
     assert main(["cycles", "--input", str(out / "data" / "codewiki.json")]) == 0
     assert main(["suggest-layers", "--input", str(out / "data" / "codewiki.json"), "--out", str(out)]) == 0
     assert main(["export", "--dir", str(out), "--zip", str(tmp_path / "bundle.zip")]) == 0
@@ -119,7 +121,9 @@ def test_large_repo_pages_instead_of_crashing(mini_py, tmp_path):
     )
     out = tmp_path / "wiki-output"
 
-    assert main(["analyze", "--src", str(mini_py), "--out", str(out), "--config", str(config)]) == 0
+    assert (
+        main(["analyze", "--src", str(mini_py), "--out", str(out), "--config", str(config), *NO_CACHE]) == 0
+    )
 
     assert not (out / "diagrams" / "system-context.mmd").exists()
     assert list((out / "diagrams").glob("system-context-part-*.mmd"))

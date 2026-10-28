@@ -5,7 +5,46 @@
 
 ## [Unreleased]
 
-- 无。
+### 数据包 schema
+
+- 无变更：`SCHEMA_VERSION` 仍为 `1`。
+
+### 新增
+
+- `ai-annotate --deferred DIR`：把"调模型"换成**文件回放**，由上层 agent（WorkBuddy /
+  CodeBuddy 等自带模型的环境）自己作答。缺答案时把请求写成
+  `DIR/requests/<purpose>-<key>.json`（内含完整 messages、作答协议与输出形状），命令以
+  退出码 3 结束；agent 写好 `DIR/answers/<同名文件>` 后重跑同一条命令即命中并跑完。
+  全程**不读 `OPENAI_API_KEY`、不发网络请求**。请求指纹为
+  `sha256(purpose + model + messages)`：改提示词、改源码或换模型都会让旧答案失效，
+  不会拿昨天的结论回答今天的问题。答案仍按**不可信输入**处理（target 必须是本模块、
+  evidence 行号必须真实存在），写文件的一方绕不过这两道校验。
+
+### 变更
+
+- 标注取证片段改为**带行号**（`   12| code`）。`read_file` 的原始输出不带行号，模型
+  此前只能自己数行 —— `evidence` 的"行号存在于文件范围"校验因此形同虚设（数错了只是
+  换一个位置，仍然通过）。`PROMPT_VERSION` 随之升为 `annotate-v2`，v1 缓存不再复用。
+- `configs/ipip.toml` 合入 30 条 AI 架构注解（`source = "ai"`；人工那 1 条
+  `mod::app/services` 属受保护条目，原样保留）。合入前逐条核对：target 必须是产物里的
+  真实模块节点，70 处"标识符 + 行号"与 33 处行号列表必须命中真实源码行 —— 核对后
+  标记 `reviewed = true`，此后 `merge-annotations` 视其为已审阅、不再被 AI 覆盖。
+- `.gitignore` 补 `.ai-queue/` 与 `*.suggest.toml`。前者是 `--deferred` 的 `requests/`
+  与 `answers/`，带待问内容与源码片段；后者在被审阅、合进 `codewiki.toml` 之前只是候选。
+  两者都不该随仓库分发。
+
+### 修复
+
+- 模块页的审阅标记改为小写（`AI（reviewed=false）`）。此前把 Python 的 `bool` 直接插进
+  f-string，页面上是 `reviewed=False` —— 与配置里的 `reviewed = false` 字面不一致，
+  读页面的人会把它当成另一个字段名。
+- 缺答案不再中断整轮标注：`--deferred` 的"待作答"与 `AI_UNAVAILABLE` 分属两种后果，
+  前者继续问下一个模块（否则 30 个模块要来回跑 30 遍才能凑齐请求清单），后者才停。
+- FileModel 缓存目录（`.codewiki/cache/`）首次创建即写入 `.gitignore`（内容 `*`），与 AI
+  缓存同构。此前该目录不带忽略文件，一次 `git add -A` 就会把缓存连同源码提交；缓存跟着
+  clone 走之后，解析器改了行为而 `parser_version` 忘了 bump 时仍会命中旧 `FileModel` ——
+  测试全绿，产物是旧的。测试也不再往仓库内夹具写缓存（CLI 侧 `--no-cache`、pipeline 侧
+  `no_cache=True`），跑完 `find tests/fixtures -name .codewiki` 为空。
 
 ## [1.0.1] - 2026-10-28
 

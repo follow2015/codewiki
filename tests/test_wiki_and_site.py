@@ -50,6 +50,23 @@ def test_module_page_covers_symbols_neighbors_and_annotations(mini_py):
     assert "返回索引" in page
 
 
+def test_ai_annotation_tag_uses_lowercase_bool(mini_py):
+    """AI 注解的审阅标记要与配置里的字面量一致（``reviewed = false``）。
+
+    直接把 bool 插进 f-string 会把 Python 的 ``False`` 印到页面上（实测 30 个
+    模块页全是 ``AI（reviewed=False）``）：读的人会当成另一个字段名，而配置里
+    写的是小写 false —— 页面与配置对不上，是最容易被忽略的那种不一致。
+    """
+    packet = _packet(
+        mini_py,
+        annotations=[Annotation(target="mod::pkg/core.py", note="AI 建议。", source="ai", reviewed=False)],
+    )
+    page = render_module_page(packet, "mod::pkg/core.py", diagram_text=None)
+
+    assert "AI（reviewed=false）" in page
+    assert "False" not in page
+
+
 def test_module_page_embeds_the_context_diagram(mini_py):
     packet = _packet(mini_py)
     page = render_module_page(packet, "mod::pkg/core.py", diagram_text='flowchart LR\n  M["x"]\n')

@@ -3,6 +3,7 @@
 模块地图（与 §九 目录结构一致）：
 
 * :mod:`codewiki.ai.client` —— OpenAI 兼容客户端（零依赖 urllib）；
+* :mod:`codewiki.ai.deferred` —— 外置推理：由 agent 作答，零凭据、零网络；
 * :mod:`codewiki.ai.sandbox` —— 只读 shell 白名单沙箱（六层防御）；
 * :mod:`codewiki.ai.tools` —— read_file / search_codebase / query_graph；
 * :mod:`codewiki.ai.cache` —— 结果缓存与 token 预算；
@@ -14,4 +15,15 @@
 
 from __future__ import annotations
 
-__all__ = ["annotate", "audit", "cache", "client", "diagram", "merge", "prompts", "sandbox", "tools"]
+__all__ = [
+    "annotate",
+    "audit",
+    "cache",
+    "client",
+    "deferred",
+    "diagram",
+    "merge",
+    "prompts",
+    "sandbox",
+    "tools",
+]

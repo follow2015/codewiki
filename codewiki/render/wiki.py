@@ -104,7 +104,7 @@ def render_module_page(
         lines.append("## 注解")
         lines.append("")
         for note in notes:
-            tag = "人工" if note.source == "human" else f"AI（reviewed={note.reviewed}）"
+            tag = "人工" if note.source == "human" else f"AI（reviewed={str(note.reviewed).lower()}）"
             label = f"【{note.label}】" if note.label else ""
             lines.append(f"- {label}{note.note} —— *{tag}*")
         lines.append("")

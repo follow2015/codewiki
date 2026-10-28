@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import os
 from dataclasses import dataclass
@@ -71,6 +72,28 @@ class FileModelCache:
     def _path_of(self, key: str) -> Path:
         return self.dir / key[:2] / f"{key}.json"
 
+    def _ensure_dir(self) -> bool:
+        """建好缓存根目录并写一份 ``.gitignore``（内容 ``*``）；建不出来返回 ``False``。
+
+        为什么缓存目录必须自带忽略规则：FileModel 缓存是**运行时产物**，但它落在
+        被分析仓库里（``<repo>/.codewiki/cache/``）。缺这份忽略文件时，一次
+        ``git add -A`` 就会把"上一轮的解析结果"连同缓存一起提交；之后任何人 clone
+        下来都带着旧 FileModel，源码改了照样命中 —— 症状与 ``key()`` 里
+        ``parser_version`` 要防的"改了代码产物没变"完全一样，但这次是缓存文件
+        本身进了库，键里再多维度也救不了。``ai/cache.py`` 的 ai-cache 一直这么做，
+        这里补齐，两边同构。
+        """
+        try:
+            self.dir.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            self.enabled = False
+            return False
+        ignore = self.dir / ".gitignore"
+        if not ignore.exists():
+            with contextlib.suppress(OSError):
+                ignore.write_text("*\n", encoding="utf-8")
+        return True
+
     def get(self, key: str) -> FileModel | None:
         if not self.enabled:
             return None
@@ -84,6 +107,8 @@ class FileModelCache:
 
     def set(self, key: str, model: FileModel) -> None:
         if not self.enabled:
+            return
+        if not self._ensure_dir():
             return
         path = self._path_of(key)
         try:

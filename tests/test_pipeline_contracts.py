@@ -54,7 +54,7 @@ def test_pipeline_writes_the_current_version_into_the_packet():
 
 def test_analyze_writes_the_current_version(tmp_path, mini_py):
     out = tmp_path / "wiki-output"
-    assert main(["analyze", "--src", str(mini_py), "--out", str(out)]) == 0
+    assert main(["analyze", "--src", str(mini_py), "--out", str(out), "--no-cache"]) == 0
 
     meta = json.loads((out / "data" / "codewiki.json").read_text(encoding="utf-8"))["meta"]
     assert meta["tool_version"] == __version__

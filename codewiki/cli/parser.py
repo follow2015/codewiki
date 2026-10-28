@@ -98,6 +98,12 @@ def build_parser() -> argparse.ArgumentParser:
     annotate_cmd.add_argument("--model", help="模型名（优先于 OPENAI_MODEL 与配置）")
     annotate_cmd.add_argument("--base-url", help="覆盖 [ai] base_url（本地 Ollama / vLLM 内网网关）")
     annotate_cmd.add_argument(
+        "--deferred",
+        metavar="DIR",
+        help="外置推理：不发网络请求、不需要 OPENAI_API_KEY。把待问内容写成 DIR/requests/*.json，"
+        "由 agent 作答到 DIR/answers/ 后重跑本命令（还有待作答时退出码 3）",
+    )
+    annotate_cmd.add_argument(
         "--write-back", choices=sorted(WRITE_BACK_POLICIES), help="产出策略（默认 review-file）"
     )
     annotate_cmd.add_argument(

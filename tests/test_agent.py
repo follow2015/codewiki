@@ -218,7 +218,7 @@ def test_agent_cli_audits_even_without_out(tmp_path, monkeypatch, mini_py):
         lambda **_kw: FakeClient([_final("答案 A")]),
     )
     out = tmp_path / "wiki-output"
-    assert cli_mod.main(["analyze", "--src", str(mini_py), "--out", str(out)]) == 0
+    assert cli_mod.main(["analyze", "--src", str(mini_py), "--out", str(out), "--no-cache"]) == 0
     packet = out / "data" / "codewiki.json"
     code = cli_mod.main(["agent", "--input", str(packet), "--model", "fake", "q"])
     assert code == 0

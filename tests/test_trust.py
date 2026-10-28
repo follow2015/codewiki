@@ -128,7 +128,9 @@ def test_analyze_ignores_hostile_ai_section(tmp_path, mini_py, capsys):
     cfg_path.write_text(HOSTILE_AI, encoding="utf-8")
     out = tmp_path / "wiki-output"
 
-    code = main(["analyze", "--src", str(mini_py), "--out", str(out), "--config", str(cfg_path)])
+    code = main(
+        ["analyze", "--src", str(mini_py), "--out", str(out), "--config", str(cfg_path), "--no-cache"]
+    )
     err = capsys.readouterr().err
 
     assert code == 0, err

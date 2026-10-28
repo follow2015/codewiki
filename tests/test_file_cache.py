@@ -6,12 +6,18 @@
    旧事实"或"没改却白白重解析"；
 2. **坏缓存当未命中**：缓存是加速手段，不是真源；
 3. **自污染**：缓存写在仓库内（`.codewiki/`），必须被扫描排除 —— 否则第二轮
-   开始图谱里会冒出几千个缓存文件"模块"（第一轮永远测不出来）。
+   开始图谱里会冒出几千个缓存文件"模块"（第一轮永远测不出来）；
+4. **不能进版本库**：缓存目录自带 ``.gitignore``（内容 ``*``）—— 否则一次
+   ``git add -A`` 就把上一轮的解析结果提交了，之后 clone 下来命中旧 FileModel。
 """
 
 from __future__ import annotations
 
+import shutil
+import subprocess
 from pathlib import Path
+
+import pytest
 
 from codewiki.analyzers.python_analyzer import PythonAstAnalyzer
 from codewiki.file_cache import FileModelCache, content_hash_of, mtime_ns_of
@@ -91,6 +97,31 @@ def test_second_scan_after_cache_write_stays_clean(tmp_path, monkeypatch):
     second = list(iter_source_files(tmp_path))
 
     assert [f.path for f in first] == [f.path for f in second] == ["a.py"]
+
+
+@pytest.mark.skipif(shutil.which("git") is None, reason="需要 git")
+def test_cache_dir_carries_its_own_gitignore(tmp_path):
+    """缓存目录自带 ``.gitignore``（内容 ``*``）：``git add -A`` 不该把缓存收进仓库。
+
+    这条来自实测事故：``tests/fixtures/cyclic_py/.codewiki/cache/`` 的 9 个 JSON
+    被 ``git add -A`` 提交进库（5cb83df）。后果不只是"脏" —— 缓存跟着 clone 走之后，
+    解析器改了行为但 ``parser_version`` 忘了 bump 时，下一轮照样命中旧 FileModel，
+    测试全绿而产物是旧的。ai-cache 一直自带忽略文件，FileModel 缓存当时漏了。
+    """
+    FileModelCache(tmp_path).set("k", _model())
+
+    ignore = tmp_path / ".codewiki" / "cache" / ".gitignore"
+    assert ignore.is_file(), "缓存目录必须自带 .gitignore"
+    assert ignore.read_text(encoding="utf-8").strip() == "*"
+
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True, capture_output=True)
+    listed = subprocess.run(
+        ["git", "-C", str(tmp_path), "status", "--porcelain", "--untracked-files=all"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert listed.stdout.strip() == "", f"缓存不能被 git 看见，实际: {listed.stdout!r}"
 
 
 def test_missing_stat_does_not_block(tmp_path):

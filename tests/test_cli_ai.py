@@ -112,7 +112,9 @@ def prepared(tmp_path, mini_py, stub_url, monkeypatch):
     cfg = tmp_path / "codewiki.toml"
     cfg.write_text(MINI_CFG, encoding="utf-8")
     out = tmp_path / "wiki-output"
-    assert main(["analyze", "--src", str(mini_py), "--out", str(out), "--config", str(cfg)]) == 0
+    assert (
+        main(["analyze", "--src", str(mini_py), "--out", str(out), "--config", str(cfg), "--no-cache"]) == 0
+    )
     return {
         "cfg": cfg,
         "out": out,
@@ -164,7 +166,18 @@ def test_full_loop_analyze_annotate_merge_rerender(prepared, monkeypatch, capsys
 
     out2 = prepared["out"].parent / "wiki-output2"
     assert (
-        main(["analyze", "--src", str(prepared["src"]), "--out", str(out2), "--config", str(prepared["cfg"])])
+        main(
+            [
+                "analyze",
+                "--src",
+                str(prepared["src"]),
+                "--out",
+                str(out2),
+                "--config",
+                str(prepared["cfg"]),
+                "--no-cache",
+            ]
+        )
         == 0
     )
     packet = json.loads((out2 / "data" / "codewiki.json").read_text(encoding="utf-8"))

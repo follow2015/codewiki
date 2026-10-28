@@ -18,7 +18,7 @@ from pathlib import Path
 
 CACHE_DIRNAME = ".codewiki/ai-cache"
 
-PROMPT_VERSION = "annotate-v1"
+PROMPT_VERSION = "annotate-v2"
 
 
 def digest_of(text: str) -> str:

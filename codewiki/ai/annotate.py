@@ -22,9 +22,10 @@ from pathlib import Path
 
 from codewiki.ai.cache import PROMPT_VERSION, ResultCache, TokenBudget, cache_key, digest_of, estimate_tokens
 from codewiki.ai.client import ChatMessage, LLMError, OpenAICompatClient
+from codewiki.ai.deferred import PendingRequest
 from codewiki.ai.prompts import ANNOTATE_SYSTEM, render_annotate_user
 from codewiki.ai.registry import default_registry
-from codewiki.ai.tools import resolve_in_repo, scan_prompt_injection
+from codewiki.ai.tools import resolve_in_repo, scan_prompt_injection, wrap_untrusted
 from codewiki.schemas import Annotation, Diagnostic
 
 SUGGEST_FILENAME = "annotations.suggest.toml"
@@ -59,7 +60,9 @@ class AnnotateResult:
     suggestions: list[Suggestion] = field(default_factory=list)
     diagnostics: list[Diagnostic] = field(default_factory=list)
     skipped: list[str] = field(default_factory=list)
+    pending: list[str] = field(default_factory=list)
     degraded: bool = False
+    model_calls: int = 0
 
 
 def module_degrees(packet) -> dict[str, int]:
@@ -117,22 +120,38 @@ def build_context(packet, cfg, *, src_root: Path | None) -> tuple[list[str], lis
     return layers, annotations
 
 
+def number_lines(text: str, *, width: int = 5) -> str:
+    """给源码加行号前缀（``   12| code``），供 Prompt 引用。
+
+    §5.2 要求"结论必须引用 file:line"，而 :func:`codewiki.ai.tools.read_file`
+    的原始输出**不带行号** —— 此前模型只能靠自己数行：evidence 校验只比对
+    "行号是否落在文件范围内"，数错了照样通过，校验形同虚设。行号进了 Prompt，
+    引用才有可核对的目标。
+    """
+    return "\n".join(f"{index:>{width}}| {line}" for index, line in enumerate(text.splitlines(), start=1))
+
+
 def _read_for_prompt(path: str, *, src_root: Path | None) -> tuple[str, str]:
     """取证用的源码片段；取不到就返回 ``( "", "" )``（Prompt 里会显式标注"未取证"）。
 
     返回 ``(raw, wrapped)``：注入扫描必须做在 **raw** 上 —— wrapped 里带着我们
-    自己的合法分隔符，拿去扫描会把每个模块都误报成注入。两档都由注册表产出，
-    annotate 不自己调 read_file、也不自己包裹（同一份过滤/审计实现，设计文稿
-    §AI 层安全模型第 2 条"没有第二条读源码的路径"）。
+    自己的合法分隔符，拿去扫描会把每个模块都误报成注入。
+
+    读文件仍走注册表（同一份路径 jail / 密钥过滤 / 审计），只有"加行号再包裹"
+    这一层是本地做的：包裹用同一份 :func:`wrap_untrusted`（含分隔符中性化），
+    不是另起一份拼接实现。
     """
     if src_root is None:
         return "", ""
     try:
-        return default_registry(repo_root=src_root).call_raw(
+        raw, _wrapped = default_registry(repo_root=src_root).call_raw(
             "read_file", {"path": path}, max_chars=MAX_SOURCE_CHARS
         )
     except Exception:  # noqa: BLE001 - 取证失败不得中断：退化为"无源码"路径
         return "", ""
+    if not raw:
+        return "", ""
+    return raw, wrap_untrusted(number_lines(raw), origin=path)
 
 
 def _parse_suggestions(raw: str) -> tuple[list[Suggestion], list[str]]:
@@ -254,6 +273,16 @@ def annotate_modules(
             ]
             try:
                 reply = client.chat(messages)
+            except PendingRequest as exc:
+                result.pending.append(module["id"])
+                if audit:
+                    audit.record(
+                        tool="llm.deferred",
+                        args={"target": module["id"]},
+                        outcome="skipped",
+                        detail=f"待作答 {exc.key}",
+                    )
+                continue
             except LLMError as exc:
                 result.degraded = True
                 result.diagnostics.append(
@@ -269,6 +298,7 @@ def annotate_modules(
                         tool="llm.chat", args={"target": module["id"]}, outcome="error", detail=str(exc)
                     )
                 break
+            result.model_calls += 1
             raw = reply.content
             budget.spend(reply.total_tokens or estimate_tokens(user_prompt + raw))
             if cache is not None:
@@ -383,6 +413,7 @@ __all__ = [
     "annotate_modules",
     "build_context",
     "module_degrees",
+    "number_lines",
     "protected_targets",
     "render_suggestions_toml",
     "select_modules",

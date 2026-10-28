@@ -70,7 +70,7 @@ wiki-output/
 | `suggest-layers` | 社区发现 → 建议分层（纯静态） | 否 |
 | `merge-layers` | 合并建议分层（不覆盖人工层） | 否 |
 | `import-graph` | 导入外部图谱（graphify）→ 统一数据包 | 否 |
-| `ai-annotate` | AI 架构标注 → 建议文件（**不改主配置**） | 是 |
+| `ai-annotate` | AI 架构标注 → 建议文件（**不改主配置**）；`--deferred` 时由 agent 作答 | 是 |
 | `merge-annotations` | 合并 AI 建议（人工注解受保护） | 否 |
 | `agent` | 交互问答：模型调只读工具取证后作答 | 是 |
 
@@ -90,6 +90,26 @@ codewiki ai-annotate --input wiki-output/data/codewiki.json --config codewiki.to
 # ③ 回开发机：diff 审阅后合并，重新 analyze 生效
 codewiki merge-annotations /tmp/ai/suggestions/annotations.suggest.toml
 ```
+
+### 无凭据、不出网：让 agent 充当模型（`--deferred`）
+
+在自带模型的 agent 环境（WorkBuddy / CodeBuddy）里，往往既没有 `OPENAI_API_KEY`
+也不必出网。此时把"调模型"拆成三步，全程零凭据、零网络请求：
+
+```bash
+# ① 只导出待问内容；还有待作答时退出码 3（不是失败）
+codewiki ai-annotate --input wiki-output/data/codewiki.json --config codewiki.toml --src . \
+  --out wiki-output --deferred .ai-queue
+
+# ② agent 读 .ai-queue/requests/*.json（文件自带作答协议），按其中 system 提示要求的
+#    输出形状，把答案写进 .ai-queue/answers/<同名文件>
+
+# ③ 重跑同一条命令：命中答案 → 产出建议文件（退出码 0）
+```
+
+请求指纹是 `sha256(purpose + model + messages)`：改提示词、改源码或换模型都会让旧答案
+自动失效。答案按**不可信输入**处理 —— target 必须是本模块、evidence 行号必须真实存在，
+写文件的一方绕不过这两道校验。<!-- guarantee: ai-deferred -->
 
 `codewiki.toml` 来自被分析仓库，因此 `[ai]` 里的 **`model` / `base_url` / `write_back`
 只认命令行与环境变量**（写在文件里会被忽略并提示原因）——否则 hostile 仓库可以把

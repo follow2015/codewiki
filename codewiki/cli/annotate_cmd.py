@@ -17,6 +17,7 @@ from pathlib import Path
 from codewiki.ai.annotate import annotate_modules, write_suggestions
 from codewiki.ai.audit import AUDIT_FILENAME, AuditLog
 from codewiki.ai.client import OpenAICompatClient, resolve_base_url, resolve_model
+from codewiki.ai.deferred import DEFAULT_MODEL, DeferredClient, render_pending_report
 from codewiki.ai.merge import merge_annotations, render_merge_report
 from codewiki.config import CONFIG_FILENAME, ConfigError
 from codewiki.packetio import PacketError, load_packet
@@ -27,6 +28,8 @@ from codewiki.trust import load_trusted_config
 from .context import trusted
 
 WRITE_BACK_POLICIES = frozenset({"review-file", "dry-run", "confirm", "auto"})
+
+EXIT_PENDING = 3
 
 
 def annotate(args: argparse.Namespace) -> int:
@@ -42,10 +45,14 @@ def annotate(args: argparse.Namespace) -> int:
         print(f"error: {exc}", file=sys.stderr)
         return 2
     model = resolve_model(cli_value=args.model, config_value=cfg.ai.model)
+    deferred_root = Path(args.deferred).resolve() if getattr(args, "deferred", None) else None
+    if not model and deferred_root is not None:
+        model = DEFAULT_MODEL
     if not model:
         print(
             "error: 未指定模型 —— 用 --model 或环境变量 OPENAI_MODEL 指定"
-            "（codewiki.toml 里的 [ai] model 默认被忽略：该文件来自被分析仓库）",
+            "（codewiki.toml 里的 [ai] model 默认被忽略：该文件来自被分析仓库；"
+            "用 --deferred 则无需指定）",
             file=sys.stderr,
         )
         return 2
@@ -65,15 +72,20 @@ def annotate(args: argparse.Namespace) -> int:
     out_dir.mkdir(parents=True, exist_ok=True)
     cache_root = Path(args.cache_dir).resolve() if args.cache_dir else (src_root or Path.cwd())
 
-    base_url, base_url_warning = resolve_base_url(cli_value=args.base_url, config_value=cfg.ai.base_url)
-    if base_url_warning:
-        print(f"warning: {base_url_warning}", file=sys.stderr)
-    client = OpenAICompatClient(
-        model=model,
-        base_url=base_url,
-        timeout_s=cfg.ai.timeout_s,
-        max_retries=cfg.ai.max_retries,
-    )
+    if deferred_root is not None:
+        if args.base_url:
+            print("warning: --deferred 模式不发网络请求，--base-url 已忽略", file=sys.stderr)
+        client = DeferredClient(deferred_root, model=model)
+    else:
+        base_url, base_url_warning = resolve_base_url(cli_value=args.base_url, config_value=cfg.ai.base_url)
+        if base_url_warning:
+            print(f"warning: {base_url_warning}", file=sys.stderr)
+        client = OpenAICompatClient(
+            model=model,
+            base_url=base_url,
+            timeout_s=cfg.ai.timeout_s,
+            max_retries=cfg.ai.max_retries,
+        )
     write_back = args.write_back or cfg.ai.write_back
     if write_back not in WRITE_BACK_POLICIES:
         print(
@@ -99,6 +111,13 @@ def annotate(args: argparse.Namespace) -> int:
     suggest_path = write_suggestions(result.suggestions, out_dir)
     write_diagnostics_md(out_dir / "suggestions", diagnostics)
 
+    if result.pending and write_back in ("confirm", "auto"):
+        print(
+            f"warning: {len(result.pending)} 个模块待作答，本轮降级为 review-file（不自动合并）",
+            file=sys.stderr,
+        )
+        write_back = "review-file"
+
     print(f"AI 建议 {len(result.suggestions)} 条（跳过 {len(result.skipped)} 个模块）")
     if write_back == "dry-run":
         print("（dry-run：未写文件）")
@@ -120,6 +139,13 @@ def annotate(args: argparse.Namespace) -> int:
     if result.degraded:
         print("AI 未完成（部分结果已保留，静态产物不受影响）", file=sys.stderr)
         return 1
+
+    if result.pending:
+        items = client.pending() if isinstance(client, DeferredClient) else []
+        report = render_pending_report(items, root=deferred_root or Path.cwd())
+        if report:
+            print(report, file=sys.stderr)
+        return EXIT_PENDING
     return 0
 
 
