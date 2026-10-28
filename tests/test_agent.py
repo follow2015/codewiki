@@ -114,6 +114,8 @@ def test_unknown_tool_is_reported_not_executed(mini_py, tmp_path):
         "read_file",
         "search_codebase",
         "query_graph",
+        "list_modules",
+        "find_symbol",
         "git_log",
         "git_show",
     }
@@ -121,6 +123,8 @@ def test_unknown_tool_is_reported_not_executed(mini_py, tmp_path):
         "read_file",
         "search_codebase",
         "query_graph",
+        "list_modules",
+        "find_symbol",
         "git_log",
         "git_show",
         "execute_shell",

@@ -22,6 +22,7 @@ import shlex
 from dataclasses import dataclass
 from pathlib import Path
 
+from codewiki.ai.graph_tools import suggest_node_ids
 from codewiki.ai.guard import (
     PathDenied,
     is_secret_file,
@@ -326,7 +327,13 @@ def query_graph(
 
     nodes = {n.id: n.model_dump(mode="json") for n in packet.nodes}
     if node_id not in nodes:
-        raise ToolError(f"节点不存在: {node_id}")
+        similar = suggest_node_ids(packet, node_id)
+        hint = (
+            f"；相近的节点：{', '.join(similar)}"
+            if similar
+            else "；可用 list_modules / find_symbol 查看有哪些节点"
+        )
+        raise ToolError(f"节点不存在: {node_id}{hint}")
 
     frontier = {node_id}
     seen: set[str] = {node_id}

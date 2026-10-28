@@ -30,6 +30,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from codewiki.ai.graph_tools import find_symbol, list_modules
 from codewiki.ai.guard import redact_model
 from codewiki.ai.tools import (
     GraphHit,
@@ -227,6 +228,14 @@ def _tool_git_show(args: dict[str, Any], ctx: ToolContext) -> str:
     return git_show(repo_root=ctx.require_root(), rev=args["rev"], path=args["path"])
 
 
+def _tool_list_modules(args: dict[str, Any], ctx: ToolContext) -> str:
+    return list_modules(ctx.require_packet(), layer=args.get("layer") or "", limit=args.get("limit"))
+
+
+def _tool_find_symbol(args: dict[str, Any], ctx: ToolContext) -> str:
+    return find_symbol(ctx.require_packet(), args["name"], limit=args.get("limit"))
+
+
 def _tool_execute_shell(args: dict[str, Any], ctx: ToolContext) -> str:
     return run_shell(args["command"], repo_root=ctx.require_root())
 
@@ -402,6 +411,26 @@ DEFAULT_SPECS: tuple[ToolSpec, ...] = (
             Param("depth", INT, required=False, default=1, hint="1..10"),
         ),
         handler=_tool_query_graph,
+    ),
+    ToolSpec(
+        name="list_modules",
+        summary="按层列出模块（度数降序；先用它摸清仓库，再 query_graph）",
+        guard="无需文件 Guard（输入只有已落盘的数据包）",
+        params=(
+            Param("layer", STR, required=False, default="", hint="层 id 或层名；空 = 全部"),
+            Param("limit", INT, required=False, default=None, hint="默认 30，最多 200"),
+        ),
+        handler=_tool_list_modules,
+    ),
+    ToolSpec(
+        name="find_symbol",
+        summary="按名字找符号（子串、不分大小写），直接给出 path:line",
+        guard="无需文件 Guard（输入只有已落盘的数据包）",
+        params=(
+            Param("name", STR, hint="函数 / 类 / 方法名，如 Service 或 run"),
+            Param("limit", INT, required=False, default=None, hint="默认 30，最多 200"),
+        ),
+        handler=_tool_find_symbol,
     ),
     ToolSpec(
         name="git_log",

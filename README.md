@@ -116,6 +116,28 @@ codewiki ai-annotate --input wiki-output/data/codewiki.json --config codewiki.to
 API Key 发往任意地址，或让 AI 建议直接合进主配置。自己拥有的仓库要保留文件写法时，
 加 `--trust-config`（或 `CODEWIKI_TRUST_CONFIG=1`）显式授权。 <!-- guarantee: ai-config-trust -->
 
+### 问答（`agent`）：开局概览 + 引用核对
+
+```bash
+codewiki agent "鉴权入口在哪？" --input wiki-output/data/codewiki.json --src .
+```
+
+工具是闭集，且都能只用**已落盘的数据包**或只读取证来回答：
+
+| 工具 | 用途 |
+|---|---|
+| `list_modules` | 按层列模块（度数降序）：先摸清仓库，别猜 `node_id` |
+| `find_symbol` | 按名字找符号，直接给出 `path:line` |
+| `query_graph` | 看某节点的上下游；找不到时给出相近 id 候选 |
+| `read_file` / `search_codebase` | 取证（路径受仓库边界限制、密钥文件拒读） |
+| `git_log` / `git_show` | 历史（固定 argv，不接受选项） |
+
+首轮消息带项目概览（分层、热点模块、**仅 human/reviewed 的注解**），省掉"先摸一遍仓库"
+的往返。答案里的 `file:line` 会被**核对**：文件必须在仓库内、行号必须在文件范围内、
+不能是密钥文件；不通过则让模型修一次（占用一轮，最后一轮不再纠错），修不好就带
+`AI_CITATION_INVALID` 告警交付，绝不吞答案。核对只覆盖前 40 处引用，超出部分会记
+`AI_CITATION_TRUNCATED` —— 不把"没查"说成"查过了"。
+
 三条硬约束：AI **不改写静态产物**、**不直写主配置**（合并且由人发起）、
 **受保护注解（human/reviewed）连 `--force` 也不动**；取证行号不可验证的建议
 一律丢弃并记诊断。`agent` 问答的工具是闭集、shell 走白名单沙箱、轮次有硬上限、

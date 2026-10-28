@@ -291,6 +291,11 @@ class GraphBuilder:
                         self._edge(mid, module_id(owner), EdgeType.IMPORTS, alias=imp.alias)
                     continue
 
+                submodule = self._resolve_submodule(imp.module, imp.name, from_module=file.path)
+                if submodule:
+                    self._edge(mid, module_id(submodule), EdgeType.IMPORTS, alias=imp.alias)
+                    continue
+
                 target_module = self._resolve_module_path(imp.module or "", from_module=file.path)
                 if target_module:
                     self._edge(mid, module_id(target_module), EdgeType.IMPORTS, alias=imp.alias)
@@ -545,6 +550,13 @@ class GraphBuilder:
             if hit:
                 return hit
         return None
+
+    def _resolve_submodule(self, module: str | None, name: str | None, *, from_module: str) -> str | None:
+        """``from <module> import <name>`` 里的 ``name`` 若是子模块文件，返回其路径。"""
+        if not name:
+            return None
+        dotted = f"{module or ''}{name}" if (module or "").endswith(".") or not module else f"{module}.{name}"
+        return self._resolve_module_path(dotted, from_module=from_module)
 
     def _probe_candidate(self, candidate: str) -> str | None:
         """候选路径 → 实际文件（带语言后缀 / 包 __init__ / 裸路径）。"""
