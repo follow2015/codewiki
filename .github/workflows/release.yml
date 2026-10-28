@@ -51,6 +51,9 @@ jobs:
         run: |
           python -m venv "$RUNNER_TEMP/release"
           "$RUNNER_TEMP/release/bin/python" -m pip install dist/*.whl
+          # 硬断言前必须离开仓库根：`python -c` 会把 cwd 塞进 sys.path，
+          # 在仓库根跑会 import 到源码树（v1.0.1 首跑实测翻车点）。
+          cd "$RUNNER_TEMP"
           # 硬断言：装好的这份必须来自 site-packages，而不是被源码树顶掉。
           # 没有这条，下面"跑测试全绿"可能测的是源码树，等于没验打包。
           "$RUNNER_TEMP/release/bin/python" -c "

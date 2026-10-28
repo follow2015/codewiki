@@ -183,6 +183,29 @@ def test_installed_package_is_proven_to_come_from_site_packages(workflow: dict[s
     assert "site-packages" in joined, "缺少「import 自 site-packages」的自证"
 
 
+def test_site_packages_assertion_runs_away_from_the_repo_root(workflow: dict[str, Any]):
+    """自证断言所在步骤必须先 cd 出仓库根。
+
+    `python -c` 会把 cwd 塞进 sys.path —— v1.0.1 首跑（run 40621075897）就是在
+    仓库根跑这条断言，import 到源码树当场 AssertionError。wheel 装没装对根本
+    不是问题，问题出在步骤自己的工作目录。
+    """
+    steps = [(name, script) for name, script in _run_scripts(workflow) if "site-packages" in script]
+    assert steps, "缺少「import 自 site-packages」的自证"
+
+    for name, script in steps:
+        lines = script.splitlines()
+        assert_idx = next(i for i, ln in enumerate(lines) if "site-packages" in ln)
+        cd_idx = next(
+            (i for i, ln in enumerate(lines) if ln.strip().startswith('cd "$RUNNER_TEMP"')),
+            -1,
+        )
+        assert cd_idx != -1 and cd_idx < assert_idx, (
+            f"步骤「{name}」在 cd 出仓库根之前就 import 了 —— python -c 会把 cwd 塞进 "
+            "sys.path，源码树会顶掉已安装的包（v1.0.1 首跑实测翻车点）"
+        )
+
+
 def test_publish_and_artifact_steps_are_present(workflow: dict[str, Any]):
     """发布动作与产物上传都在：少了任何一步，tag 打完也只是"构建了一次"。"""
     joined = "\n".join(script for _, script in _run_scripts(workflow))
