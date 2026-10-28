@@ -76,3 +76,43 @@ def test_registry_exposes_new_tools_and_validates_args(packet, mini_py):
     with pytest.raises(ToolError):
         registry.call("find_symbol", {})
     assert registry.call("list_modules", {"limit": "3"})
+
+
+def test_query_graph_reports_edge_types(packet, mini_py):
+    import json
+
+    registry = default_registry(repo_root=mini_py, packet=packet)
+    raw, _wrapped = registry.call_raw(
+        "query_graph", {"node_id": "mod::pkg/core.py", "direction": "upstream", "depth": 1}
+    )
+    payload = json.loads(raw)
+
+    assert payload["edge_count"] >= 1
+    assert payload["edge_types"].get("IMPORTS"), f"缺少边类型统计: {payload}"
+    assert payload["edges"], "逐边明细不该是空的"
+    assert all(row["type"] for row in payload["edges"]), "逐边明细也要带 type"
+    assert {"from", "to", "type"} <= set(payload["edges"][0])
+
+
+def test_query_graph_edge_rows_are_capped_but_counted(packet, mini_py):
+    """明细有上限，被截掉多少要写出来 —— 静默截断会让模型以为"就这么多"。"""
+    import json
+
+    from codewiki.ai.registry import MAX_EDGE_ROWS
+
+    registry = default_registry(repo_root=mini_py, packet=packet)
+    raw, _wrapped = registry.call_raw("query_graph", {"node_id": "mod::pkg/core.py", "depth": 3})
+    payload = json.loads(raw)
+
+    assert len(payload["edges"]) <= MAX_EDGE_ROWS
+    assert payload["edges_truncated"] == max(0, payload["edge_count"] - len(payload["edges"]))
+
+
+def test_query_graph_keeps_legacy_fields(packet, mini_py):
+    """``node`` / ``related`` 是老字段：加类型不能把它们挤掉（提示词里在用）。"""
+    import json
+
+    registry = default_registry(repo_root=mini_py, packet=packet)
+    payload = json.loads(registry.call_raw("query_graph", {"node_id": "mod::pkg/core.py"})[0])
+    assert payload["node"]["id"] == "mod::pkg/core.py"
+    assert isinstance(payload["related"], list) and payload["related"]

@@ -1,11 +1,14 @@
 """AI 结果缓存与 token 预算（§5.5）。
 
-缓存键 = ``文件内容 hash + 提示词版本 + 模型名``（+ 可选拓扑 hash）。
-三个成分缺一不可：
+缓存键 = ``文件内容 hash + 提示词版本 + 模型名``（+ 可选邻居上下文 hash / 拓扑 hash）。
+这些成分缺一不可：
 
 - 少了文件 hash ⇒ 改了代码还拿旧结论；
 - 少了提示词版本 ⇒ 改了 Prompt 却命中旧缓存，表现为"改了没效果"；
-- 少了模型名 ⇒ 换模型后拿另一个模型的答案，成本与质量都对不上账。
+- 少了模型名 ⇒ 换模型后拿另一个模型的答案，成本与质量都对不上账；
+- 少了**邻居 hash** ⇒ 本模块一字未改、但它的上下游变了，注解依据已经不同，
+  旧答案却被复用 —— 这是"注解与图谱对不上"的最隐蔽来源（本模块文件内容是
+  缓存键里唯一会变的东西时尤其如此）。
 
 拓扑 hash 默认**关**（§5.5 明确为可选优化项，不作为阶段二验收门槛）。
 """
@@ -18,7 +21,7 @@ from pathlib import Path
 
 CACHE_DIRNAME = ".codewiki/ai-cache"
 
-PROMPT_VERSION = "annotate-v2"
+PROMPT_VERSION = "annotate-v3"
 
 
 def digest_of(text: str) -> str:
@@ -31,9 +34,12 @@ def cache_key(
     model: str,
     prompt_version: str = PROMPT_VERSION,
     topology_hash: str | None = None,
+    neighbors_hash: str | None = None,
 ) -> str:
-    """按三个（或四个）成分算缓存键。"""
+    """按各成分算缓存键。"""
     parts = [prompt_version, model, content_hash]
+    if neighbors_hash:
+        parts.append(f"nbr:{neighbors_hash}")
     if topology_hash:
         parts.append(f"topo:{topology_hash}")
     return hashlib.sha256("|".join(parts).encode("utf-8")).hexdigest()

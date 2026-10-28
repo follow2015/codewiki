@@ -40,15 +40,33 @@ class FakeClient(OpenAICompatClient):
     为什么要走"注入客户端"而不是真的起一个 HTTP stub：客户端的失败分类
     （认证 / 不可达 / 响应坏）才是要测的东西，起 stub 只会把断言推到 HTTP 层，
     反而测不到分类。
+
+    :attr:`supports_native_tools` 置 False：agent 的用例都在验**文本协议**
+    （一行一个 JSON 决定），原生 tool_calls 的行为由 ``test_ai_client`` 单独锁。
+    置 True 会让既有用例的请求形状悄悄变掉，却看不出新能力是否真的被用到。
     """
+
+    supports_native_tools = False
 
     def __init__(self, replies, *, model: str = "fake-model") -> None:
         super().__init__(model=model, api_key="test-key", base_url="http://localhost/v1")
         self.replies = list(replies)
         self.calls: list[list] = []
+        self.extensions: list[dict] = []
 
-    def chat(self, messages, *, temperature: float = 0.2) -> ChatResult:
+    def chat(
+        self,
+        messages,
+        *,
+        temperature: float = 0.2,
+        tools=None,
+        response_format=None,
+        tool_choice=None,
+    ) -> ChatResult:
         self.calls.append(list(messages))
+        self.extensions.append(
+            {"tools": tools, "response_format": response_format, "tool_choice": tool_choice}
+        )
         if not self.replies:
             return ChatResult(content="", model=self.model)
         item = self.replies.pop(0)

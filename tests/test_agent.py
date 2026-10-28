@@ -18,7 +18,7 @@ import json
 
 from codewiki.ai.agent import ALLOWED_TOOLS, ALLOWED_TOOLS_WITH_SHELL, AgentLoop
 from codewiki.ai.audit import AuditLog
-from codewiki.ai.client import LLMUnavailable
+from codewiki.ai.client import ChatResult, LLMUnavailable
 from codewiki.ai.tools import DELIM_BEGIN
 from codewiki.graph import build_graph
 from codewiki.render.jsonio import packet_from_parts
@@ -229,3 +229,85 @@ def test_agent_cli_audits_even_without_out(tmp_path, monkeypatch, mini_py):
     assert (out / AUDIT_FILENAME).exists(), (
         f"无 --out 也必须有审计文件: {sorted(p.name for p in Path(out).iterdir())}"
     )
+
+
+class _NativeClient(FakeClient):
+    """支持原生 tools 的假客户端：按顺序回放（``ChatResult`` 原样返回）。"""
+
+    supports_native_tools = True
+
+    def __init__(self, replies):
+        super().__init__(replies)
+        self.tool_payloads: list = []
+
+    def chat(self, messages, *, temperature=0.2, tools=None, response_format=None, tool_choice=None):
+        self.tool_payloads.append(tools)
+        self.calls.append(list(messages))
+        if not self.replies:
+            return ChatResult(content="", model=self.model)
+        item = self.replies.pop(0)
+        if isinstance(item, Exception):
+            raise item
+        if isinstance(item, ChatResult):
+            return item
+        return ChatResult(content=str(item), model=self.model, prompt_tokens=10, completion_tokens=20)
+
+
+def _tool_call(name: str, **args) -> ChatResult:
+    from codewiki.ai.client import ToolCall
+
+    return ChatResult(
+        content="",
+        model="fake-model",
+        tool_calls=(ToolCall(id="c1", name=name, arguments=json.dumps(args)),),
+        finish_reason="tool_calls",
+        prompt_tokens=10,
+        completion_tokens=20,
+    )
+
+
+def test_native_tools_are_sent_when_client_supports_them(mini_py, tmp_path):
+    client = _NativeClient([_tool_call("read_file", path="pkg/core.py"), _final("见 pkg/core.py:11")])
+    loop = AgentLoop(client, _packet(mini_py), repo_root=mini_py)
+    result = loop.run("q")
+
+    assert client.tool_payloads[0], "支持原生 tools 的客户端必须收到工具声明"
+    names = {item["function"]["name"] for item in client.tool_payloads[0]}
+    assert {"read_file", "query_graph", "list_modules"} <= names
+    assert result.finished and result.answer
+
+
+def test_text_protocol_client_is_not_sent_tool_schema(mini_py, tmp_path):
+    """客户端声明不支持时一个原生字段都不该发（否则每轮白吃一次 400）。"""
+    client = FakeClient([_final("ok")])
+    AgentLoop(client, _packet(mini_py), repo_root=mini_py).run("q")
+    assert client.extensions[0]["tools"] is None
+
+
+def test_native_tool_call_observation_is_wrapped(mini_py, tmp_path):
+    client = _NativeClient([_tool_call("read_file", path="pkg/core.py"), _final("见 pkg/core.py:11")])
+    AgentLoop(client, _packet(mini_py), repo_root=mini_py).run("q")
+    assert DELIM_BEGIN in client.calls[1][-1].content, "原生调用的观察同样是不可信数据"
+
+
+def test_native_round_is_capped(mini_py, tmp_path):
+    """一轮给一堆调用时不能全跑：上限之外的要明说"分轮提出"。"""
+    from codewiki.ai.agent import MAX_TOOL_CALLS_PER_ROUND
+    from codewiki.ai.audit import AuditLog
+    from codewiki.ai.client import ToolCall
+
+    many = ChatResult(
+        content="",
+        model="fake-model",
+        tool_calls=tuple(
+            ToolCall(id=f"c{i}", name="list_modules", arguments="{}")
+            for i in range(MAX_TOOL_CALLS_PER_ROUND + 2)
+        ),
+    )
+    client = _NativeClient([many, _final("ok")])
+    loop = AgentLoop(client, _packet(mini_py), repo_root=mini_py, audit=AuditLog(tmp_path / "a.jsonl"))
+    result = loop.run("q")
+
+    executed = [r for r in result.rounds if r.get("native")]
+    assert len(executed) == MAX_TOOL_CALLS_PER_ROUND
+    assert "分轮提出" in client.calls[1][-1].content

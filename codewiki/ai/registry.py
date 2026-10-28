@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections import Counter
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -48,11 +49,15 @@ from codewiki.ai.tools import (
 
 DEFAULT_MAX_OBSERVATION_CHARS = 6000
 
+MAX_EDGE_ROWS = 40
+
 STR = "str"
 INT = "int"
 FLOAT = "float"
 STR_LIST = "str_list"
 _KINDS = frozenset({STR, INT, FLOAT, STR_LIST})
+
+_JSON_TYPES = {STR: "string", INT: "integer", FLOAT: "number", STR_LIST: "array"}
 
 _TAG_RE = re.compile(r"<[^>]*>")
 
@@ -105,6 +110,39 @@ class ToolSpec:
                 }
                 for p in self.params
             ],
+        }
+
+    def function_schema(self) -> dict[str, Any]:
+        """OpenAI ``tools`` 里的单条 function 声明（从同一份声明派生）。
+
+        派生而不是手写第二份清单：手写的那份一定会漂移，而漂移的表现是模型
+        调用一个"提示词里有、注册表里没有"的参数，然后被参数校验拒掉。
+        """
+        properties: dict[str, Any] = {}
+        required: list[str] = []
+        for param in self.params:
+            spec: dict[str, Any] = {"type": _JSON_TYPES[param.kind]}
+            if param.kind == STR_LIST:
+                spec["items"] = {"type": "string"}
+            if param.choices:
+                spec["enum"] = list(param.choices)
+            if param.hint:
+                spec["description"] = param.hint
+            properties[param.name] = spec
+            if param.required:
+                required.append(param.name)
+        return {
+            "type": "function",
+            "function": {
+                "name": self.name,
+                "description": self.summary,
+                "parameters": {
+                    "type": "object",
+                    "properties": properties,
+                    "required": required,
+                    "additionalProperties": False,
+                },
+            },
         }
 
 
@@ -205,11 +243,19 @@ def _tool_query_graph(args: dict[str, Any], ctx: ToolContext) -> str:
         direction=args.get("direction") or "both",
         depth=args.get("depth") if args.get("depth") is not None else 1,
     )
+    counts = Counter(str(edge.get("type") or "UNKNOWN") for edge in hit.edges)
+    rows = [
+        {"from": edge.get("source"), "to": edge.get("target"), "type": edge.get("type")}
+        for edge in hit.edges[:MAX_EDGE_ROWS]
+    ]
     return json.dumps(
         {
             "node": hit.node,
             "related": [r.get("path") or r.get("id") for r in hit.related],
-            "edges": len(hit.edges),
+            "edge_count": len(hit.edges),
+            "edge_types": dict(sorted(counts.items())),
+            "edges": rows,
+            "edges_truncated": max(0, len(hit.edges) - len(rows)),
         },
         ensure_ascii=False,
     )
@@ -270,6 +316,10 @@ class ToolRegistry:
 
     def describe(self) -> list[dict[str, Any]]:
         return [self._specs[n].describe() for n in sorted(self._specs)]
+
+    def tool_schema(self) -> list[dict[str, Any]]:
+        """OpenAI 原生 ``tools`` 声明（顺序固定，便于缓存与断言）。"""
+        return [self._specs[name].function_schema() for name in sorted(self._specs)]
 
     def __contains__(self, name: object) -> bool:
         return name in self._specs

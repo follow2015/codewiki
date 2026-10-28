@@ -1,15 +1,20 @@
 """OpenAI 兼容客户端（§5.3）。
 
-三条硬约束：
+四条硬约束：
 
 1. **零新增依赖**：用标准库 ``urllib`` 直连 `/chat/completions`，不为「调一次
    HTTP」引入 httpx/openai SDK（那会把离线安装与 wheel 矩阵一起拖下水）；
 2. **密钥不落盘、不写日志、不进产物**（§5.3）：只从环境变量读，任何异常消息
    都要过 :func:`codewiki.ai.audit.redact`；
 3. **失败要可分类**：认证明败 / 不可达 / 响应不可用是三种后果 —— 认证错继续
-   重试是浪费，不可达直接放弃会让一次抖动毁掉整轮。
+   重试是浪费，不可达直接放弃会让一次抖动毁掉整轮；
+4. **扩展能力要可降级**：``tools`` / ``response_format`` 是可选增强，自建网关
+   （Ollama / vLLM / 各家代理）支持程度参差。被拒时去掉扩展重发一次，并把
+   "降级过"记在 :attr:`ChatResult.degraded` 上 —— 静默降级会让上层的"要求 JSON
+   输出"变成一句空话而无人知晓。
 
-重试只针对 429 / 5xx，指数退避；其它 4xx 直接失败（§5.5）。
+重试只针对 429 / 5xx，指数退避；4xx 里的 400/422 归 :class:`LLMBadRequest`
+（可能是网关不认扩展字段），其它 4xx 直接失败（§5.5）。
 """
 
 from __future__ import annotations
@@ -20,7 +25,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from codewiki.ai.audit import redact
 
@@ -105,6 +110,32 @@ class LLMBadResponse(LLMError):
     """响应结构不符合预期（无法解析出内容）。"""
 
 
+class LLMBadRequest(LLMError):
+    """请求本身不被接受（400 / 422）。
+
+    与 :class:`LLMAuthError` 分开的理由很实际：**它可能是网关不认扩展字段**
+    （``tools`` / ``response_format``）。这种情况值得去掉扩展再试一次，
+    而认证失败重试只会浪费配额。
+    """
+
+
+@dataclass(frozen=True)
+class ToolCall:
+    """模型请求的一次原生函数调用。"""
+
+    id: str
+    name: str
+    arguments: str
+
+    def args(self) -> dict:
+        """尽力解析成 dict；解析不了返回空 dict（工具层会按缺参数拒绝）。"""
+        try:
+            data = json.loads(self.arguments or "{}")
+        except json.JSONDecodeError:
+            return {}
+        return data if isinstance(data, dict) else {}
+
+
 @dataclass(frozen=True)
 class ChatMessage:
     role: str
@@ -118,6 +149,9 @@ class ChatResult:
     prompt_tokens: int | None = None
     completion_tokens: int | None = None
     raw: dict = field(default_factory=dict)
+    tool_calls: tuple[ToolCall, ...] = ()
+    finish_reason: str | None = None
+    degraded: tuple[str, ...] = ()
 
     @property
     def total_tokens(self) -> int:
@@ -126,6 +160,9 @@ class ChatResult:
 
 class OpenAICompatClient:
     """OpenAI 兼容 Chat Completions 客户端（可指向 Ollama / vLLM 内网网关）。"""
+
+    supports_native_tools = True
+    supports_json_mode = True
 
     def __init__(
         self,
@@ -145,25 +182,66 @@ class OpenAICompatClient:
         self.max_retries = max(0, max_retries)
         self.backoff_base_s = backoff_base_s
         self._transport = transport
+        self.unsupported_fields: frozenset[str] = frozenset()
 
-    def chat(self, messages: list[ChatMessage], *, temperature: float = 0.2) -> ChatResult:
-        """发一次对话；失败抛 :class:`LLMError` 的子类。"""
+    def chat(
+        self,
+        messages: list[ChatMessage],
+        *,
+        temperature: float = 0.2,
+        tools: list[dict] | None = None,
+        response_format: dict | None = None,
+        tool_choice: str | dict | None = None,
+    ) -> ChatResult:
+        """发一次对话；失败抛 :class:`LLMError` 的子类。
+
+        ``tools`` / ``response_format`` 是可选增强：网关不认时去掉重发一次，
+        并在 :attr:`ChatResult.degraded` 里如实标注降级过哪些字段。
+        """
         payload = {
             "model": self.model,
             "messages": [{"role": m.role, "content": m.content} for m in messages],
             "temperature": temperature,
         }
+        extensions: dict = {}
+        if tools:
+            extensions["tools"] = list(tools)
+        if response_format:
+            extensions["response_format"] = response_format
+        if tool_choice is not None:
+            extensions["tool_choice"] = tool_choice
+        extensions = {
+            name: value for name, value in extensions.items() if name not in self.unsupported_fields
+        }
+
+        if not extensions:
+            return self._parse(self._send(payload))
+
+        try:
+            data = self._send({**payload, **extensions})
+        except LLMBadRequest as rejection:
+            try:
+                data = self._send(payload)
+            except LLMError as fallback_failure:
+                raise LLMBadRequest(
+                    f"扩展参数（{', '.join(sorted(extensions))}）被网关拒绝（{rejection}）后回退仍失败：{fallback_failure}"
+                ) from fallback_failure
+            self.unsupported_fields = self.unsupported_fields | frozenset(extensions)
+            result = self._parse(data)
+            return replace(result, degraded=result.degraded + tuple(sorted(extensions)))
+        return self._parse(data)
+
+    def _send(self, payload: dict) -> dict:
+        """发送并按"可重试/不可重试"分类；只重试 :class:`LLMUnavailable`。"""
         attempt = 0
         while True:
             try:
-                data = self._post(payload)
-                break
+                return self._post(payload)
             except LLMUnavailable:
                 if attempt >= self.max_retries:
                     raise
                 attempt += 1
                 time.sleep(self.backoff_base_s * (2 ** (attempt - 1)))
-        return self._parse(data)
 
     def _post(self, payload: dict) -> dict:
         if self._transport is not None:
@@ -183,6 +261,8 @@ class OpenAICompatClient:
         except urllib.error.HTTPError as exc:
             if exc.code in (401, 403):
                 raise LLMAuthError(f"认证失败（HTTP {exc.code}）：检查 {ENV_API_KEY} 与网关鉴权") from exc
+            if exc.code in (400, 422):
+                raise LLMBadRequest(f"请求被拒绝（HTTP {exc.code}）") from exc
             if exc.code == 429 or 500 <= exc.code < 600:
                 raise LLMUnavailable(f"服务端不可用/限流（HTTP {exc.code}）") from exc
             raise LLMError(f"请求失败（HTTP {exc.code}）") from exc
@@ -196,17 +276,71 @@ class OpenAICompatClient:
 
     def _parse(self, data: dict) -> ChatResult:
         try:
-            content = data["choices"][0]["message"]["content"]
+            choice = data["choices"][0]
+            message = choice["message"]
         except (KeyError, IndexError, TypeError) as exc:
-            raise LLMBadResponse(f"响应缺少 choices[0].message.content: {redact(str(data))[:200]}") from exc
+            raise LLMBadResponse(f"响应缺少 choices[0].message: {redact(str(data))[:200]}") from exc
+        if not isinstance(message, dict):
+            raise LLMBadResponse(f"choices[0].message 不是对象: {redact(str(message))[:120]}")
+
+        content = _flatten_content(message.get("content"))
+        tool_calls = _parse_tool_calls(message.get("tool_calls"))
+        if not content.strip() and not tool_calls:
+            raise LLMBadResponse("响应既没有 content 也没有 tool_calls")
         usage = data.get("usage") or {}
         return ChatResult(
-            content=content or "",
+            content=content,
             model=data.get("model", self.model),
             prompt_tokens=usage.get("prompt_tokens"),
             completion_tokens=usage.get("completion_tokens"),
             raw=data,
+            tool_calls=tool_calls,
+            finish_reason=choice.get("finish_reason") if isinstance(choice, dict) else None,
         )
+
+
+def _flatten_content(content) -> str:
+    """把 content 归一化成字符串。
+
+    部分网关返回 ``[{"type":"text","text":"..."}]`` 的分段形式；以前这种响应
+    会被判成"缺少 content"，把一次成功的调用变成失败。
+    """
+    if content is None:
+        return ""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for item in content:
+            if isinstance(item, dict):
+                text = item.get("text")
+                if isinstance(text, str):
+                    parts.append(text)
+            elif isinstance(item, str):
+                parts.append(item)
+        return "".join(parts)
+    return str(content)
+
+
+def _parse_tool_calls(raw) -> tuple[ToolCall, ...]:
+    """解析 tool_calls；形状不对的条目**跳过**（模型输出不受我们控制）。"""
+    if not isinstance(raw, list):
+        return ()
+    calls: list[ToolCall] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        function = item.get("function")
+        if not isinstance(function, dict):
+            continue
+        name = function.get("name")
+        if not isinstance(name, str) or not name.strip():
+            continue
+        arguments = function.get("arguments")
+        if not isinstance(arguments, str):
+            arguments = json.dumps(arguments or {}, ensure_ascii=False)
+        calls.append(ToolCall(id=str(item.get("id") or ""), name=name.strip(), arguments=arguments))
+    return tuple(calls)
 
 
 def probe_connectivity(client: OpenAICompatClient) -> tuple[bool, str]:
@@ -230,10 +364,12 @@ __all__ = [
     "ChatResult",
     "ENV_API_KEY",
     "LLMAuthError",
+    "LLMBadRequest",
     "LLMBadResponse",
     "LLMError",
     "LLMUnavailable",
     "OpenAICompatClient",
+    "ToolCall",
     "probe_connectivity",
     "resolve_base_url",
     "validate_base_url",

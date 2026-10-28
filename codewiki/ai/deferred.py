@@ -113,7 +113,15 @@ class DeferredClient:
     只实现 annotate 用到的部分（``model`` 属性 + ``chat()``）：假装接口更宽会
     诱使别的调用方接进来，而那些路径（例如 agent 的多轮工具循环）需要的是
     "每一轮都由人/agent 现场决定"，用文件回放只会得到一个假的确定性。
+
+    ``tools`` / ``response_format`` 收到即忽略，且**不参与**请求 key：作答方是
+    按 messages 里写明的形状作答的，原生参数对它没有语义；把它们塞进 key 只会
+    让同一份提示词的旧答案全部失效（实测会凭空重导出 30 个请求）。同理这里把
+    两个能力开关置 False —— 上层据此就知道"别指望原生结构化输出"。
     """
+
+    supports_native_tools = False
+    supports_json_mode = False
 
     def __init__(
         self,
@@ -163,8 +171,20 @@ class DeferredClient:
                 items.append(PendingItem(name=path.name, key=key, path=path))
         return items
 
-    def chat(self, messages: list[ChatMessage], *, temperature: float = 0.2) -> ChatResult:
-        """命中答案就返回；没有就把请求写盘并抛 :class:`PendingRequest`。"""
+    def chat(
+        self,
+        messages: list[ChatMessage],
+        *,
+        temperature: float = 0.2,
+        tools=None,
+        response_format=None,
+        tool_choice=None,
+    ) -> ChatResult:
+        """命中答案就返回；没有就把请求写盘并抛 :class:`PendingRequest`。
+
+        ``tools`` / ``response_format`` / ``tool_choice`` 接受但忽略（见类
+        docstring）：外置作答方按 messages 作答，写进 key 会让旧答案整体失效。
+        """
         key = request_key(purpose=self.purpose, model=self.model, messages=messages)
         name = file_name(purpose=self.purpose, key=key)
 

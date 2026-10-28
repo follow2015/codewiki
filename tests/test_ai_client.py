@@ -19,6 +19,7 @@ import pytest
 
 from codewiki.ai.client import (
     ChatMessage,
+    LLMBadRequest,
     LLMBadResponse,
     LLMUnavailable,
     OpenAICompatClient,
@@ -128,3 +129,153 @@ def test_probe_reports_success():
         _client(transport=lambda _p: {"choices": [{"message": {"content": "pong"}}]})
     )
     assert ok is True and "可达" in message
+
+
+def _ok(content: str = "hello", **extra) -> dict:
+    return {"choices": [{"message": {"content": content, **extra}, "finish_reason": "stop"}]}
+
+
+def test_response_format_is_sent_when_asked():
+    seen: dict = {}
+
+    def transport(payload):
+        seen.update(payload)
+        return _ok("{}")
+
+    _client(transport=transport).chat(
+        [ChatMessage(role="user", content="hi")], response_format={"type": "json_object"}
+    )
+    assert seen["response_format"] == {"type": "json_object"}
+
+
+def test_no_extension_fields_when_not_asked():
+    """不点名就不要发 —— 平白多出的字段是自找的 400。"""
+    seen: dict = {}
+    _client(transport=lambda p: seen.update(p) or _ok()).chat([ChatMessage(role="user", content="hi")])
+    assert "response_format" not in seen and "tools" not in seen
+
+
+def test_unsupported_extension_falls_back_to_plain_request():
+    payloads: list[dict] = []
+
+    def transport(payload):
+        payloads.append(dict(payload))
+        if "response_format" in payload:
+            raise LLMBadRequest("HTTP 400 unsupported parameter: response_format")
+        return _ok("纯文本 JSON 也行")
+
+    client = _client(transport=transport)
+    result = client.chat([ChatMessage(role="user", content="hi")], response_format={"type": "json_object"})
+
+    assert result.content == "纯文本 JSON 也行"
+    assert result.degraded == ("response_format",), "降级必须被调用方看见"
+    assert len(payloads) == 2 and "response_format" not in payloads[1]
+
+
+def test_unsupported_field_is_remembered_and_not_resent():
+    """记住降级结果：每个模块都先吃一次 400 是纯浪费。"""
+    payloads: list[dict] = []
+
+    def transport(payload):
+        payloads.append(dict(payload))
+        if "tools" in payload:
+            raise LLMBadRequest("HTTP 400 unknown field tools")
+        return _ok("ok")
+
+    client = _client(transport=transport)
+    tools = [{"type": "function", "function": {"name": "f", "parameters": {}}}]
+    client.chat([ChatMessage(role="user", content="1")], tools=tools)
+    client.chat([ChatMessage(role="user", content="2")], tools=tools)
+
+    assert len(payloads) == 3, f"第二次不该再发 tools（实际 {len(payloads)} 次请求）"
+    assert "tools" not in payloads[-1]
+    assert client.unsupported_fields == frozenset({"tools"})
+
+
+def test_bad_request_without_extensions_is_raised_not_retried():
+    calls: list[int] = []
+
+    def transport(_payload):
+        calls.append(1)
+        raise LLMBadRequest("HTTP 400 bad model")
+
+    with pytest.raises(LLMBadRequest):
+        _client(transport=transport).chat([ChatMessage(role="user", content="hi")])
+    assert len(calls) == 1, "没有扩展可去掉时不该重发"
+
+
+def test_fallback_that_also_fails_reports_both():
+    """回退后仍失败：错误信息要同时说清"扩展被拒"和"去掉后也不行"。"""
+    calls: list[int] = []
+
+    def transport(_payload):
+        calls.append(1)
+        raise LLMBadRequest("HTTP 400 nope")
+
+    client = _client(transport=transport)
+    with pytest.raises(LLMBadRequest) as excinfo:
+        client.chat([ChatMessage(role="user", content="hi")], response_format={"type": "json_object"})
+    assert len(calls) == 2
+    assert "回退" in str(excinfo.value)
+
+
+def test_native_tool_calls_are_parsed():
+    data = {
+        "choices": [
+            {
+                "message": {
+                    "content": None,
+                    "tool_calls": [
+                        {
+                            "id": "call_1",
+                            "type": "function",
+                            "function": {"name": "read_file", "arguments": '{"path": "a.py"}'},
+                        }
+                    ],
+                },
+                "finish_reason": "tool_calls",
+            }
+        ]
+    }
+    result = _client(transport=lambda _p: data).chat([ChatMessage(role="user", content="hi")])
+
+    assert result.content == ""
+    assert result.finish_reason == "tool_calls"
+    assert [(c.name, c.arguments) for c in result.tool_calls] == [("read_file", '{"path": "a.py"}')]
+
+
+def test_malformed_tool_call_is_skipped_not_crashed():
+    """模型给的 tool_calls 形状不可控：没有名字的条目跳过，不要让整轮崩掉。"""
+    data = {
+        "choices": [
+            {
+                "message": {
+                    "content": "",
+                    "tool_calls": [
+                        {"id": "x"},
+                        {"function": {"name": "ok", "arguments": {"a": 1}}},
+                    ],
+                }
+            }
+        ]
+    }
+    result = _client(transport=lambda _p: data).chat([ChatMessage(role="user", content="hi")])
+    assert [c.name for c in result.tool_calls] == ["ok"]
+    assert result.tool_calls[0].arguments == '{"a": 1}', "dict 形式的 arguments 要序列化成字符串"
+
+
+def test_empty_content_and_no_tool_calls_is_bad_response():
+    client = _client(transport=lambda _p: {"choices": [{"message": {"content": None}}]})
+    with pytest.raises(LLMBadResponse):
+        client.chat([ChatMessage(role="user", content="hi")])
+
+
+def test_content_parts_are_flattened():
+    """部分网关把 content 返回成 [{type:text,text:...}] —— 不该因此判成坏响应。"""
+    data = {
+        "choices": [
+            {"message": {"content": [{"type": "text", "text": "分段"}, {"type": "text", "text": "内容"}]}}
+        ]
+    }
+    result = _client(transport=lambda _p: data).chat([ChatMessage(role="user", content="hi")])
+    assert result.content == "分段内容"

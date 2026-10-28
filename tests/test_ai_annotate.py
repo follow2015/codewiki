@@ -277,3 +277,192 @@ def test_top_n_limits_scope(mini_py):
     client = FakeClient([_reply("mod::x.py") for _ in range(10)])
     annotate_modules(_packet(mini_py), _cfg(), src_root=mini_py, client=client, top_n=1)
     assert len(client.calls) <= 1
+
+
+from codewiki.ai.cache import cache_key  # noqa: E402
+from codewiki.ai.neighbors import module_neighbors, render_neighbors  # noqa: E402
+from codewiki.models import Edge, EdgeType  # noqa: E402
+
+
+def test_prompt_contains_upstream_and_downstream(mini_py):
+    """mini 夹具里 app.py 与 pkg/__init__.py 都依赖 pkg/core.py（re-export 会解析到真实定义）。"""
+    packet = _packet(mini_py)
+    core = render_neighbors(module_neighbors(packet, "mod::pkg/core.py"))
+    assert "app.py" in core and "上游（依赖本模块的）" in core
+    pkg_init = render_neighbors(module_neighbors(packet, "mod::pkg/__init__.py"))
+    assert "pkg/core.py" in pkg_init and "下游（本模块依赖的）" in pkg_init
+
+    target = _first_target(mini_py, top_n=10)
+    client = FakeClient([_reply(target)])
+    annotate_modules(packet, _cfg(), src_root=mini_py, client=client, top_n=10)
+    prompt = client.calls[0][1].content
+    assert "上下游邻居" in prompt
+    assert "上游（依赖本模块的）" in prompt and "下游（本模块依赖的）" in prompt
+
+
+def test_neighbor_digest_is_stable_and_order_independent(mini_py):
+    """同一份数据包两次取 digest 必须一致（否则缓存永不命中）。"""
+    packet = _packet(mini_py)
+    target = "mod::pkg/__init__.py"
+    assert module_neighbors(packet, target).digest == module_neighbors(packet, target).digest
+
+
+def test_neighbor_digest_changes_with_edges(mini_py):
+    packet = _packet(mini_py)
+    target = "mod::pkg/__init__.py"
+    before = module_neighbors(packet, target).digest
+    extra = Edge(source=target, target="mod::zzz.py", type=EdgeType.IMPORTS)
+    after = module_neighbors(packet.model_copy(update={"edges": [*packet.edges, extra]}), target).digest
+    assert before != after, "多了一条依赖，邻居上下文就变了（digest 必须跟着变）"
+
+
+def test_cache_key_separates_neighbor_context():
+    """同样的文件内容、不同的邻居 ⇒ 不同的键（这条就是"别复用旧答案"的判据）。"""
+    base = dict(content_hash="abc", model="m")
+    assert cache_key(**base, neighbors_hash="n1") != cache_key(**base, neighbors_hash="n2")
+    assert cache_key(**base, neighbors_hash=None) != cache_key(**base, neighbors_hash="n1")
+
+
+def test_cache_misses_when_neighbors_change(mini_py, tmp_path):
+    """集成判据：只改边、不改文件，第二轮必须重新问模型。"""
+    packet = _packet(mini_py)
+    target = _first_target(mini_py, top_n=1)
+    annotate_modules(
+        packet,
+        _cfg(),
+        src_root=mini_py,
+        client=FakeClient([_reply(target)]),
+        top_n=1,
+        cache_root=tmp_path,
+    )
+    changed = packet.model_copy(
+        update={"edges": [*packet.edges, Edge(source=target, target="mod::zzz.py", type=EdgeType.IMPORTS)]}
+    )
+    client = FakeClient([])
+    annotate_modules(changed, _cfg(), src_root=mini_py, client=client, top_n=1, cache_root=tmp_path)
+    assert client.calls != [], "邻居变了却命中旧缓存 ⇒ 注解会与图谱对不上"
+
+
+def test_parse_failure_is_retried_once_with_the_error(mini_py):
+    target = _first_target(mini_py)
+    client = FakeClient(["抱歉，我没按格式输出 {不完整", _reply(target)])
+    result = annotate_modules(_packet(mini_py), _cfg(), src_root=mini_py, client=client, top_n=1)
+
+    assert result.model_calls == 2, "解析失败必须重试一次（且只一次）"
+    assert [s.target for s in result.suggestions] == [target]
+    assert any(d.code == "AI_PARSE_RETRY" for d in result.diagnostics)
+
+    retry_prompt = client.calls[1][-1].content
+    assert "无法按约定解析" in retry_prompt
+    assert "不完整" in retry_prompt, "错误原因必须回喂，否则模型只会把同样的错再犯一次"
+    assert "我没按格式输出" in retry_prompt, "上一轮原文要给它看，不然它不知道改什么"
+
+
+def test_parse_failure_twice_is_reported_and_not_cached(mini_py, tmp_path):
+    target = _first_target(mini_py)
+    client = FakeClient(["bad", "still bad"])
+    result = annotate_modules(
+        _packet(mini_py), _cfg(), src_root=mini_py, client=client, top_n=1, cache_root=tmp_path
+    )
+
+    assert result.suggestions == []
+    assert result.model_calls == 2, "重试只做一次"
+    codes = [d.code for d in result.diagnostics]
+    assert "AI_PARSE_FAILED" in codes
+    assert target in result.skipped
+
+    cache_dir = tmp_path / ".codewiki" / "ai-cache"
+    leftovers = list(cache_dir.glob("*.json")) if cache_dir.is_dir() else []
+    assert leftovers == [], "解析不了的原文不能进缓存（否则该模块每次重跑都命中同一段坏答案）"
+
+
+def test_unparseable_cache_entry_is_treated_as_miss(mini_py, tmp_path):
+    """旧版本可能已经把坏答案写进缓存：读到它必须当未命中，而不是一直复用它。"""
+    from codewiki.ai.cache import PROMPT_VERSION, ResultCache, cache_key, digest_of
+
+    packet = _packet(mini_py)
+    target = _first_target(mini_py)
+    module = select_modules(packet, top_n=1, protected=protected_targets(_cfg().annotations, packet))[0]
+    from codewiki.ai.annotate import _read_for_prompt
+
+    _raw, snippet = _read_for_prompt(module["path"], src_root=mini_py)
+    neighbors = module_neighbors(packet, module["id"])
+    key = cache_key(
+        content_hash=digest_of(f"{module['path']}::{snippet}"),
+        model="fake-model",
+        prompt_version=PROMPT_VERSION,
+        neighbors_hash=neighbors.digest,
+    )
+    ResultCache(tmp_path).set(key, {"raw": "这不是 JSON", "model": "fake-model"})
+
+    client = FakeClient([_reply(target)])
+    result = annotate_modules(packet, _cfg(), src_root=mini_py, client=client, top_n=1, cache_root=tmp_path)
+    assert client.calls, "坏缓存必须当未命中"
+    assert [s.target for s in result.suggestions] == [target]
+
+    again = FakeClient([])
+    annotate_modules(packet, _cfg(), src_root=mini_py, client=again, top_n=1, cache_root=tmp_path)
+    assert again.calls == [], "坏缓存被重问之后没有写回好答案"
+
+
+def test_conclusion_anchors_pick_code_names_only():
+    from codewiki.ai.annotate import conclusion_anchors
+
+    anchors = conclusion_anchors("这里用 `Svc` 做编排，并把 MAX_RETRY 交给 mark_stale 处理")
+    assert "Svc" in anchors and "MAX_RETRY" in anchors and "mark_stale" in anchors
+    assert "the" not in anchors and "JSON" not in anchors
+
+
+def _evidence_payload(target: str, *, note: str, path: str, lines: list[int]) -> str:
+    return json.dumps(
+        {
+            "modules": [
+                {
+                    "target": target,
+                    "label": "入口",
+                    "note": note,
+                    "evidence": [{"path": path, "lines": lines}],
+                }
+            ],
+            "unknown": [],
+        }
+    )
+
+
+def test_evidence_that_does_not_mention_the_anchor_is_rejected(mini_py):
+    """行号真实、但所引行里没有结论提到的代码名 ⇒ 引用不支持结论。"""
+    target = _first_target(mini_py)
+    payload = _evidence_payload(target, note="`MAX_RETRY` 控制重试次数上限", path="pkg/core.py", lines=[4])
+    result = annotate_modules(
+        _packet(mini_py), _cfg(), src_root=mini_py, client=FakeClient([payload]), top_n=1
+    )
+
+    assert result.suggestions == []
+    assert [d.code for d in result.diagnostics] == ["AI_EVIDENCE_UNSUPPORTED"]
+
+
+def test_evidence_that_contains_the_anchor_is_accepted(mini_py):
+    target = _first_target(mini_py)
+    payload = _evidence_payload(target, note="`MAX_RETRY` 控制重试次数上限", path="pkg/core.py", lines=[23])
+    result = annotate_modules(
+        _packet(mini_py), _cfg(), src_root=mini_py, client=FakeClient([payload]), top_n=1
+    )
+
+    assert [s.target for s in result.suggestions] == [target]
+
+
+def test_prose_only_note_falls_back_to_existence_check(mini_py):
+    """纯中文结论没有可抽取的代码名 —— 只能核到"行号存在"，但不能因此拒掉。"""
+    target = _first_target(mini_py)
+    payload = _evidence_payload(target, note="负责入口编排", path="app.py", lines=[6])
+    result = annotate_modules(
+        _packet(mini_py), _cfg(), src_root=mini_py, client=FakeClient([payload]), top_n=1
+    )
+    assert [s.target for s in result.suggestions] == [target]
+
+
+def test_annotate_requests_json_mode(mini_py):
+    target = _first_target(mini_py)
+    client = FakeClient([_reply(target)])
+    annotate_modules(_packet(mini_py), _cfg(), src_root=mini_py, client=client, top_n=1)
+    assert client.extensions[0]["response_format"] == {"type": "json_object"}

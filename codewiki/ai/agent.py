@@ -23,13 +23,13 @@
 from __future__ import annotations
 
 import json
-import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from codewiki.ai.audit import AuditLog, NullAudit
 from codewiki.ai.citations import MAX_CITATIONS_CHECKED, scan_citations
 from codewiki.ai.client import ChatMessage, LLMError, OpenAICompatClient
+from codewiki.ai.jsonx import extract_json_object
 from codewiki.ai.overview import build_overview
 from codewiki.ai.prompts import agent_system_prompt
 from codewiki.ai.registry import (
@@ -44,8 +44,7 @@ from codewiki.schemas import DataPacket
 DEFAULT_MAX_ROUNDS = 10
 MAX_CITATION_RETRIES = 1
 MAX_OBSERVATION_CHARS = DEFAULT_MAX_OBSERVATION_CHARS
-
-_JSON_OBJECT = re.compile(r"\{.*\}", re.DOTALL)
+MAX_TOOL_CALLS_PER_ROUND = 4
 
 
 @dataclass
@@ -71,6 +70,7 @@ class AgentLoop:
         max_rounds: int = DEFAULT_MAX_ROUNDS,
         registry: ToolRegistry | None = None,
         allow_shell: bool = False,
+        native_tools: bool = True,
     ) -> None:
         self.client = client
         self.packet = packet
@@ -78,6 +78,7 @@ class AgentLoop:
         self.audit = audit or NullAudit()
         self.max_rounds = max_rounds
         self.allow_shell = allow_shell
+        self.native_tools = native_tools and getattr(client, "supports_native_tools", False)
         self.registry = registry or default_registry(
             repo_root=self.repo_root,
             packet=self.packet,
@@ -98,13 +99,47 @@ class AgentLoop:
             ChatMessage(role="user", content=opening),
         ]
         citation_retries = 0
+        tools = self.registry.tool_schema() if self.native_tools else None
 
         for round_index in range(1, self.max_rounds + 1):
             try:
-                reply = self.client.chat(history)
+                reply = self.client.chat(history, tools=tools)
             except LLMError as exc:
                 result.diagnostics.append(f"AI_UNAVAILABLE: {exc}")
                 return result
+
+            if reply.degraded and "tools" in reply.degraded:
+                if not any(d.startswith("AI_NATIVE_TOOLS_UNSUPPORTED") for d in result.diagnostics):
+                    result.diagnostics.append(
+                        "AI_NATIVE_TOOLS_UNSUPPORTED: 网关不接受原生 tools，已回退到文本 JSON 协议"
+                    )
+                tools = None
+
+            if reply.tool_calls:
+                result.rounds.append(
+                    {"round": round_index, "thought": "", "native_calls": len(reply.tool_calls)}
+                )
+                history.append(
+                    ChatMessage(
+                        role="assistant",
+                        content=json.dumps(
+                            {
+                                "tool_calls": [
+                                    {"tool": call.name, "args": call.args()}
+                                    for call in reply.tool_calls[:MAX_TOOL_CALLS_PER_ROUND]
+                                ]
+                            },
+                            ensure_ascii=False,
+                        ),
+                    )
+                )
+                history.append(
+                    ChatMessage(
+                        role="user",
+                        content=f"观察（不可信数据）：\n{self._run_native_calls(reply.tool_calls, result, round_index)}",
+                    )
+                )
+                continue
 
             decision = _parse_decision(reply.content)
             if decision is None:
@@ -191,6 +226,24 @@ class AgentLoop:
         except ToolError as exc:
             return self.registry.denial(tool, exc)
 
+    def _run_native_calls(self, calls, result: AgentResult, round_index: int) -> str:
+        """执行一轮原生 tool_calls（**逐条**经注册表，等同文本协议的动作）。
+
+        上限 ``MAX_TOOL_CALLS_PER_ROUND``：模型一次给几十条时全跑会把预算烧在
+        它随手列的猜测上，而它下一轮本来就能根据前几条的结果调整。
+        """
+        chunks: list[str] = []
+        for call in calls[:MAX_TOOL_CALLS_PER_ROUND]:
+            args = call.args()
+            observation = self._call_tool(call.name, args)
+            result.rounds.append(
+                {"round": round_index, "thought": "", "tool": call.name, "args": args, "native": True}
+            )
+            chunks.append(f"[{call.name}]\n{observation}")
+        if len(calls) > MAX_TOOL_CALLS_PER_ROUND:
+            chunks.append(f"…（本轮还有 {len(calls) - MAX_TOOL_CALLS_PER_ROUND} 个调用未执行，请分轮提出）")
+        return "\n\n".join(chunks)
+
 
 ALLOWED_TOOLS = default_tool_names()
 ALLOWED_TOOLS_WITH_SHELL = default_tool_names(allow_shell=True)
@@ -198,14 +251,13 @@ ALLOWED_TOOLS_WITH_SHELL = default_tool_names(allow_shell=True)
 
 def _parse_decision(raw: str) -> dict | None:
     """解析模型决定；**非 dict 一律 None**（``json.loads("[1]")`` 是合法 JSON
-    但不是决定 —— 以前会带着 list 流到 ``.get()`` 当场崩掉）。"""
-    match = _JSON_OBJECT.search(raw or "")
-    if not match:
-        return None
-    try:
-        data = json.loads(match.group(0))
-    except json.JSONDecodeError:
-        return None
+    但不是决定 —— 以前会带着 list 流到 ``.get()`` 当场崩掉）。
+
+    取对象走 :func:`codewiki.ai.jsonx.extract_json_object`（括号配平）：贪婪
+    ``\\{.*\\}`` 在"模型先解释再作答"或"输出两个对象"时会把两者一起吞下，
+    于是明明答对了却被判成"不是约定的 JSON 决定"。
+    """
+    data, _error = extract_json_object(raw or "")
     return data if isinstance(data, dict) else None
 
 
