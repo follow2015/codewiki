@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "codewiki"
-version = "1.0.0"
+version = "1.0.1"
 description = "配置驱动、可离线交付的代码架构知识图谱与文档生成器"
 readme = "README.md"
 license = "Apache-2.0"

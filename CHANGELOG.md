@@ -5,6 +5,10 @@
 
 ## [Unreleased]
 
+- 无。
+
+## [1.0.1] - 2026-10-28
+
 ### 数据包 schema
 
 - 无变更：`SCHEMA_VERSION` 仍为 `1`，1.x 内只增不删。读取入口统一到
@@ -48,6 +52,13 @@
 - CI 矩阵收成两端（`requires-python` 下界 + 开发基线），action 升到声明 node24 的
   版本；`networkx` 下限由 `>=3.7` 降到 `>=3.6`（3.7 要 Python >=3.12，与
   `requires-python = ">=3.11"` 冲突，3.11 那条腿此前根本装不上）。
+- **CLI 拆分为包**：`cli.py` 1052 行 → `cli/__init__.py` 29 行 + 19 个模块
+  （13 个子命令各一模块），分析主体 230 行搬进 `codewiki/pipeline/analyze.py`
+  （`AnalyzeRequest` + `run()`，去 argparse 化）。产物经 `diff -rq` 逐字节全等。
+- 解析注册表改为**按轮注入**（`AnalyzeRequest.registry`，缺省每轮
+  `build_registry()`），不再共享进程级单例 —— "哪个后端解析了文件"由此可测可观测。
+- 解析后端黄金从 Python 两个后端扩到三种语言四个后端（python ast/regex、
+  typescript/go treesitter），并声明 regex 的降级边界：不产出调用/继承事实。
 
 ### 修复
 
@@ -58,6 +69,15 @@
 - 打包：`packages.find` 的 `namespaces` 默认开启会把 `codewiki-deploy/` 副本整棵树
   打进 wheel，已关闭。
 - `Completed.truncated` 此前用 `len(stdout) > max_output` 判断，恒为假。
+- **发布链路接线**：`release.yml` 补进同步白名单（此前部署仓里根本没有它，
+  "打 tag 就发布"在真实发布仓不存在）；tag 版本校验与 wheel 校验从内联
+  `python -c` 抽成 `scripts/check_release_tag.py` / `scripts/verify-wheel.py`
+  共享脚本，本地可预先验。
+- 新增 `git_log` / `git_show` 有类型工具，`--allow-shell` 可退役；mermaid 渲染
+  显式写死 `securityLevel:"strict"`。
+- Gitea CI 修复：自建实例把 `uses: owner/repo@ref` 短写法解析到实例自身导致
+  job 0 秒即红，改用完整 URL；手写依赖清单加漂移守卫（pyproject 声明的依赖
+  必须出现在 workflow 安装清单里）。
 
 ## [1.0.0]
 
