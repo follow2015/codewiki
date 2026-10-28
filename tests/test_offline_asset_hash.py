@@ -14,6 +14,10 @@ import hashlib
 import re
 from pathlib import Path
 
+import pytest
+
+pytestmark = pytest.mark.source_tree
+
 ASSETS = Path(__file__).resolve().parent.parent / "codewiki" / "assets"
 ASSET = ASSETS / "mermaid.min.js"
 DIGEST = ASSETS / "mermaid.min.js.sha256"

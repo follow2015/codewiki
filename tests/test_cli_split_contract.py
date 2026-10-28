@@ -15,6 +15,10 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
+import pytest
+
+pytestmark = pytest.mark.source_tree
+
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 CLI_DIR = PROJECT_ROOT / "codewiki" / "cli"
 CLI_LEGACY_MODULE = PROJECT_ROOT / "codewiki" / "cli.py"

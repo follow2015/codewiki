@@ -153,8 +153,8 @@ def test_tests_run_against_the_installed_wheel_not_the_source_tree(workflow: dic
     """跑测试的解释器必须是装了 wheel 的那个 venv。
 
     退回源码树的后果不是"报错"，而是**全绿**：``pip install -e .`` 让打包配置写错
-    也照样能 import。判据是三步同时成立 —— 用 venv 的 python、cwd 在临时目录、
-    ``-o pythonpath=`` 清掉源码树路径。
+    也照样能 import。判据是三步同时成立 —— 用 venv 的 python、pythonpath 指向
+    仓库根（tests/ 是命名空间包，收集需要它）、**源码树已挪出仓库**。
 
     ⚠️ 必须**按行**判断 ``-m pytest`` 那条命令，不能只看"这段脚本里出现过 venv 路径"：
     同一步骤的上一行是 ``"$RUNNER_TEMP/release/bin/python" -m pip install pytest``，
@@ -171,7 +171,16 @@ def test_tests_run_against_the_installed_wheel_not_the_source_tree(workflow: dic
             assert "$RUNNER_TEMP/release/bin/python" in command, (
                 f"步骤「{name}」跑的这条 pytest 没用装好 wheel 的 venv：{command.strip()}"
             )
-        assert "-o pythonpath=" in script, f"步骤「{name}」没清 pythonpath —— 仓库根的源码树会顶掉已安装的包"
+        assert "-o pythonpath=" in script, (
+            f"步骤「{name}」没配 pythonpath —— tests/ 是命名空间包，仓库根必须可导入，否则收集阶段就崩"
+        )
+        assert 'mv "$GITHUB_WORKSPACE/codewiki"' in script, (
+            f"步骤「{name}」没有把源码树挪出仓库 —— pythonpath 指向仓库根后，"
+            "源码树会顶掉已安装的 wheel，测的就不是用户拿到的东西"
+        )
+        assert '-m "not source_tree"' in command or '-m "not source_tree" \\' in script, (
+            f"步骤「{name}」没排除 source_tree 标记用例 —— 它们读源码布局，源码树已挪走，跑起来只会假红"
+        )
 
 
 def test_installed_package_is_proven_to_come_from_site_packages(workflow: dict[str, Any]):

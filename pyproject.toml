@@ -60,6 +60,7 @@ addopts = "-q --tb=short"
 # 双向校验（README 有测试没有 ⇒ 承诺没人验证；测试有 README 没有 ⇒ id 拼错）。
 markers = [
     "guarantee(id): 该用例守护 README 里标注 `<!-- guarantee: id -->` 的那条承诺",
+    "source_tree: 该用例读取仓库源码布局（AST/源码路径），只对源码树有意义；对构建出的 wheel 跑测试时被 release.yml 的 -m 过滤排除",
 ]
 
 [tool.ruff]

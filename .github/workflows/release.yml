@@ -62,16 +62,24 @@ jobs:
           print('import 自:', codewiki.__file__)
           "
 
-      # 跑测试时把 cwd 切到临时目录，并把 pythonpath 清空 —— pyproject 里配了
-      # `pythonpath = ["."]`，在仓库根跑会把源码树插到已安装的包前面。
+      # 跑测试时把 cwd 切出仓库根、并**把源码树挪走**：pytest 收集 tests/ 需要
+      # 仓库根可导入（from tests.conftest import ...，tests/ 无 __init__.py，
+      # 是命名空间包），但仓库根也有 codewiki/ 源码 —— 留着它，site-packages
+      # 里的 wheel 就被顶掉（v1.0.1 第一跑翻在 cwd，第二跑翻在 pythonpath）。
       - name: 对构建出的 wheel 跑测试（主仓有 tests，发布仓没有）
         if: hashFiles('tests/**') != ''
         shell: bash
         run: |
-          "$RUNNER_TEMP/release/bin/python" -m pip install pytest
-          cd "$RUNNER_TEMP"
+          # pyyaml：test_release_workflow / test_gitea_workflow 结构化解析用
+          "$RUNNER_TEMP/release/bin/python" -m pip install pytest pyyaml
+          mv "$GITHUB_WORKSPACE/codewiki" "$RUNNER_TEMP/codewiki-src-hidden"
+          # cwd 回仓库根：pyproject 相对路径读法（test_python_floor 等）依赖它；
+          # 源码树已挪走，cwd 在仓库根不再有遮蔽风险。source_tree 标记的用例
+          # 读的是源码布局，对 wheel 无意义，排除。
+          cd "$GITHUB_WORKSPACE"
           "$RUNNER_TEMP/release/bin/python" -m pytest -p no:randomly \
-            -o pythonpath= -o testpaths= "$GITHUB_WORKSPACE/tests"
+            -m "not source_tree" \
+            -o pythonpath="$GITHUB_WORKSPACE" "$GITHUB_WORKSPACE/tests"
 
       - name: 端到端冲烟（装好的 wheel）
         shell: bash

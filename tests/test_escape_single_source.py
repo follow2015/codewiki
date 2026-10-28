@@ -19,6 +19,8 @@ import ast
 import re
 from pathlib import Path
 
+import pytest
+
 from codewiki.render.escape import escape_attr, escape_text
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -75,6 +77,7 @@ def test_both_helpers_escape_the_five_html_characters() -> None:
             assert ch not in out, f"{helper.__name__} 漏了 {ch!r}：{out!r}"
 
 
+@pytest.mark.source_tree
 def test_escape_module_stays_a_leaf() -> None:
     """转义模块不得 import 渲染层的其它模块（否则又会绕回依赖环）。"""
     tree = ast.parse(ESCAPE_MODULE.read_text(encoding="utf-8"))

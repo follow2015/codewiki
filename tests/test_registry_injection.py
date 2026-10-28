@@ -17,6 +17,8 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
+import pytest
+
 from codewiki.analyzers import build_registry
 from codewiki.pipeline.analyze import AnalyzeRequest, run
 
@@ -39,6 +41,7 @@ def _loaded_names(tree: ast.AST) -> set[str]:
     return {node.id for node in ast.walk(tree) if isinstance(node, ast.Name)}
 
 
+@pytest.mark.source_tree
 def test_pipeline_does_not_reach_for_the_process_registry() -> None:
     """跑到哪个后端是产物的一部分，不能取决于"进程里那份单例当时是什么状态"。
 
