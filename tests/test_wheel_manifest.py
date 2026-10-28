@@ -97,6 +97,7 @@ def test_missing_wheel_is_reported(tmp_path, src_tree):
     assert verify_wheel.verify(tmp_path / "nope.whl", src_tree)
 
 
+@pytest.mark.source_tree
 def test_real_repository_layout_passes(tmp_path):
     """拿当前仓库的真实源码清单造一个"完整" wheel，必须通过。
 
