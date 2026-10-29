@@ -17,10 +17,18 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from pathlib import Path
 
 CACHE_DIRNAME = ".codewiki/ai-cache"
 
+#: 提示词版本：改 Prompt 就必须 +1，否则旧缓存会盖住新行为。
+#:
+#: annotate-v2：取证片段改为**带行号**（此前 read_file 输出不带行号，evidence
+#: 只能靠模型自己数行，"行号存在"校验因此形同虚设）。行号进了 Prompt ⇒ 语义变了
+#: ⇒ v1 的答案不能再复用。
+#: annotate-v3：用户提示新增**上下游邻居**段 ⇒ 同一份源码的作答依据变了
+#: （此前只看得见本文件，现在能看见谁依赖它），v2 的答案同样不能再复用。
 PROMPT_VERSION = "annotate-v3"
 
 
@@ -45,15 +53,27 @@ def cache_key(
     return hashlib.sha256("|".join(parts).encode("utf-8")).hexdigest()
 
 
+def default_cache_dir() -> Path:
+    """用户级默认缓存目录 —— **不落在被分析仓库里**。
+
+    此前默认取 ``--src``（被分析仓库）：键 = 内容 hash + 提示词版本 + 模型名，
+    同版本工具可自行复算，于是被审仓库只要预置 ``ai-cache/<key>.json``，
+    命中时 ``raw`` 只校验"是 JSON"就被当作模型答案采信 —— 审计第三方代码时
+    这是一条可投毒的通道。缓存只是加速，没有理由写进别人的仓库。
+    """
+    base = os.environ.get("XDG_CACHE_HOME") or str(Path.home() / ".cache")
+    return Path(base) / "codewiki" / "ai-cache"
+
+
 class ResultCache:
     """文件系统缓存（JSON 文件，一个键一个文件）。
 
-    缓存默认写在**被分析仓库**里（``.codewiki/ai-cache``）—— 目录创建时
-    自带 ``.gitignore``（内容 ``*``），不脏人家的工作树。
+    ``directory`` 就是缓存目录本身。目录创建时自带 ``.gitignore``（内容 ``*``），
+    万一路径落在工作树里也不脏人家的 ``git status``。
     """
 
-    def __init__(self, root: Path) -> None:
-        self.dir = root / CACHE_DIRNAME
+    def __init__(self, directory: Path) -> None:
+        self.dir = Path(directory)
 
     def get(self, key: str) -> dict | None:
         path = self.dir / f"{key}.json"
@@ -62,7 +82,7 @@ class ResultCache:
         try:
             return json.loads(path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
-            return None
+            return None  # 坏缓存当未命中，不阻断
 
     def set(self, key: str, value: dict) -> None:
         self.dir.mkdir(parents=True, exist_ok=True)

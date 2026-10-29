@@ -87,6 +87,8 @@ def render_layer_block(layer: LayerSpec) -> str:
     """渲染一个 ``[[architecture.layers]]`` 段（带来源注释）。"""
     lines = [SOURCE_MARK, "[[architecture.layers]]", f'name = "{_escape(layer.name)}"']
     lines.append("paths = [" + ", ".join(f'"{_escape(p)}"' for p in layer.paths) + "]")
+    if layer.order is not None:
+        lines.append(f"order = {layer.order}")
     if layer.color:
         lines.append(f'color = "{_escape(layer.color)}"')
     return "\n".join(lines)
@@ -121,6 +123,7 @@ def merge_layers(config_path: Path, suggest_path: Path, *, dry_run: bool = False
     suggested = load_suggested_layers(suggest_path)
     outcome = plan_merge_layers(suggested, cfg.architecture.layers)
     if not dry_run:
+        # 有重叠就**不写**：要求人工先选择（规则 2）
         if outcome.overlaps:
             outcome.changed = False
             return outcome

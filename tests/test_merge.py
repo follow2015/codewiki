@@ -63,6 +63,7 @@ def test_merge_appends_and_config_stays_loadable(tmp_path, suggest):
     outcome = merge_annotations(config, suggest)
 
     assert len(outcome.added) == 2
+    # round-trip：追加不能把用户的配置写坏
     cfg = load_config(config)
     assert cfg.project.name == "demo"
     assert {a.target for a in cfg.annotations} == {"mod::pkg/core.py", "mod::app.py"}
@@ -93,7 +94,9 @@ def test_human_annotation_is_protected_even_with_force(tmp_path, suggest):
     assert "mod::pkg/core.py" in outcome.protected
     stored = {a.target: a.note for a in existing_annotations(config)}
     assert stored["mod::pkg/core.py"] == "人工写的说明", "force 也不许覆盖人工注解"
-    assert "--force" in render_merge_report(outcome) or True
+    report = render_merge_report(outcome)
+    assert "受保护" in report, report
+    assert "--force 也不动" in report, "报告要说清楚 force 对人工注解无效，否则用户会反复试"
 
 
 def test_conflict_is_reported_not_silently_overwritten(tmp_path, suggest):
@@ -167,3 +170,51 @@ def test_plan_merge_protects_reviewed_ai_annotation():
     incoming = Annotation(target="mod::a.py", note="新建议", source="ai", reviewed=False)
     outcome = plan_merge([incoming], [reviewed], force=True)
     assert outcome.protected == ["mod::a.py"] and outcome.added == []
+
+
+def test_malformed_suggestions_raise_user_level_error(tmp_path):
+    """畸形 TOML 是用户输入问题，不该把 tomllib 的堆栈直接甩到人脸上。"""
+    from codewiki.ai.merge import MergeInputError
+
+    bad = tmp_path / "bad.toml"
+    bad.write_text('[[annotations]\ntarget = "x"\n', encoding="utf-8")
+    with pytest.raises(MergeInputError) as exc:
+        load_suggestions(bad)
+    assert "bad.toml" in str(exc.value), "错误信息必须指出是哪个文件"
+
+
+def test_invalid_annotation_item_raises_user_level_error(tmp_path):
+    """缺必填字段（note）同样属输入错误，要指名道姓而不是裸 ValidationError。"""
+    from codewiki.ai.merge import MergeInputError
+
+    bad = tmp_path / "missing-note.toml"
+    bad.write_text('[[annotations]]\ntarget = "mod::a.py"\n', encoding="utf-8")
+    with pytest.raises(MergeInputError) as exc:
+        load_suggestions(bad)
+    assert "note" in str(exc.value) or "第 1 条" in str(exc.value)
+
+
+def test_malformed_main_config_raises_user_level_error(tmp_path):
+    """主配置坏了也走同一条路：说清楚哪个文件坏在哪。"""
+    from codewiki.ai.merge import MergeInputError
+
+    cfg = tmp_path / "codewiki.toml"
+    cfg.write_text("[project\nname = 'x'\n", encoding="utf-8")
+    with pytest.raises(MergeInputError):
+        existing_annotations(cfg)
+
+
+def test_merge_cli_reports_input_error_without_traceback(tmp_path, capsys):
+    """CLI 层：退出码 2 + 一行人话，stderr 里不许出现 Traceback。"""
+    from codewiki.cli import main
+
+    cfg = tmp_path / "codewiki.toml"
+    cfg.write_text('[project]\nname = "demo"\n', encoding="utf-8")
+    bad = tmp_path / "bad.toml"
+    bad.write_text("[[annotations]\n", encoding="utf-8")
+
+    code = main(["merge-annotations", str(bad), "--config", str(cfg), "--dry-run"])
+    err = capsys.readouterr().err
+    assert code == 2, code
+    assert "Traceback" not in err, err
+    assert "bad.toml" in err

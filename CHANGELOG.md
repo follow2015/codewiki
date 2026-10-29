@@ -11,6 +11,22 @@
 
 ### 新增
 
+- **`[analysis] ts_aliases`（TS/JS 模块别名）**：形如
+  `ts_aliases = { "@/*" = "frontend-new/src/*" }`。键以 `*` 结尾做前缀通配、否则
+  **精确匹配**（精确别名不会吞掉 `@configX`），值里的 `*` 承接通配到的剩余部分。
+  别名**只认配置**，不去读 tsconfig：那是 JSONC（带注释）、`paths` 又相对 `baseUrl`，
+  猜错的后果是把 `@tanstack/react-query` 这类 scoped 包错连成本地模块 —— 比"没连"
+  更难发现。没配时 `@/x` 原样留在 External，不猜。
+- **无配置时按目录推断分层**：没有声明任何 `[[architecture.layers]]` 时，不再把全部模块
+  塞进 `_unlayered`（并产生逐模块警告），而是按目录结构归层（占比过高的目录、以及超过
+  30 个模块的目录都继续按子目录下钻，碎片目录并入 `other`），层序按跨层依赖排出，并给
+  一条 `LAYERS_DERIVED` 诊断。`[architecture] auto_layers = false` 可关闭；已声明分层时
+  完全不介入。
+- **`suggest-layers` 目录优先 + 层序**：先按目录归组（超限继续下钻，仍超过 `max_group`
+  且下钻不动才用社区发现拆），按跨层导入边的强连通分量压缩与拓扑深度输出 `order`
+  （1 = 最上层），成环的层共享 order 并标注。新增 `--max-group`；`merge-layers` 现在会把
+  `order` 一并写入。兜底分层与建议共用同一份归组/排序算法与同一个门槛。
+
 - 标注 Prompt 增加**上下游邻居**段：新模块 `codewiki/ai/neighbors.py` 收集模块级
   一跳 import 关系（上游谁依赖它、下游它依赖谁，带边类型；按路径排序、每方向上限 12，
   被截掉的数量写在文本里），`PROMPT_VERSION` 升为 `annotate-v3`，缓存键新增
@@ -70,9 +86,34 @@
 - `.gitignore` 补 `.ai-queue/` 与 `*.suggest.toml`。前者是 `--deferred` 的 `requests/`
   与 `answers/`，带待问内容与源码片段；后者在被审阅、合进 `codewiki.toml` 之前只是候选。
   两者都不该随仓库分发。
+- `ai-annotate` 的缓存默认落到**用户级目录**（`$XDG_CACHE_HOME` 或 `~/.cache` 下的
+  `codewiki/ai-cache`），不再取 `--src`。缓存键由内容 hash + 提示词版本 + 模型名算出，
+  同版本工具可自行复算 —— 写进被审仓库等于留了一条"预置答案"的通道：命中时只校验
+  "是 JSON"就当作模型答案采信（审计第三方代码时尤其危险）。`--cache-dir` 语义不变，
+  仍是"根"，缓存落在其下的 `.codewiki/ai-cache`。
 
 ### 修复
 
+- **TS/JS 的 import 一条都解析不出来**（前端整片成孤岛）。`_resolve_module_path`
+  只按**点**拆模块名，而前端 specifier 是**斜杠路径**：相对导入 `./x` / `../x`、
+  别名 `@/theme/dark`，两者都落 External；更糟的是 `_external()` 也按点切，把
+  `./a.js` 截成空串，图里凭空多出 `ext::` 这种畸形节点。实测（ipip arch-e0）：
+  610 个前端模块、3713 条 import，模块间 IMPORTS 边 **0 条**，`suggest-layers` 里
+  61 个前端组有 58 个内聚度 0%。现在按 TS 的解析规则补齐三件事 —— 相对路径折算
+  （`posixpath.normpath` 吃掉 `..`）、目录导入落 `index.*`、省略扩展名按
+  `.ts → .tsx → .d.ts → .js` 顺序探测（`.d.ts` 排在实现文件之后，否则图会指向
+  没有代码的声明壳）。同一份数据包上前端 IMPORTS 边从 0 变 2068（解析率 56%，
+  其余是 react/antd 等真第三方），内聚度 0% 的组从 69/89 降到 13/89。
+- `from './x' import {Foo}` 不再被当成"子模块"去拼 `./x.Foo`。TS/JS 的 named import
+  是**导出符号**，不是 `x/Foo.ts`；旧逻辑一旦仓库里恰好存在同名子目录就会误连。
+- 层名（即层 id `layer::<name>`）不唯一时静默合并。仓库里恰好有 `other/` 或 `root/`
+  目录时，目录组与合成组同名 ⇒ 两个层拿到同一个 id：不同目录的模块被归进同一层，
+  渲染出的分层图里同一个 `subgraph` 出现两次。去重现在只有 `layering.unique_names()`
+  一处（冲突追加 `-2`/`-3`，并预先收进全部原始名字避免改名后又撞上真目录），
+  `directory_groups` 与 `suggest_layers` 共用；保留名 `_unlayered` 也被避让。
+- 兜底分层与 `suggest-layers` 粒度不一致：前者从不拆分过大的组（实测一个包 90 个模块
+  顶着一层的名义），后者会拆。现在两条路径共用 `DEFAULT_MAX_GROUP` 与同一份
+  `rank_layers`；派生层也带上按跨层依赖排出的 `order`，层图不再按模块数从多到少排。
 - 标注证据核对从"行号存在"升级为"行号存在**且**能支持结论"。此前判据是"任一条证据
   的行号落在文件范围内即通过"，于是一条指向 `README.md:1` 的证据可以为任何结论背书。
   现在从 note 抽**代码名锚点**（反引号内容、`snake_case`、`CamelCase`、全大写常量），
@@ -94,6 +135,16 @@
   `__init__.py`，包没有 `__init__`（命名空间包）时更是整条退化成 `ext::pkg` —— 图上少
   一条真实依赖，度数、热点排序、AI 语境都跟着失真。`__init__` 里确实有同名符号时仍按
   "符号优先"解析。
+- 绝对导入按 PEP 328 解析：`from utils import f` 先找**仓库根**的 `utils.py`，包内同名
+  文件只在根无匹配时兜底。此前候选顺序相反，`pkg/a.py` 里的绝对导入被静默连到
+  `pkg/utils.py`，置信度还是 1.0 —— 跨包依赖画成包内依赖，分层依赖图、环检测与
+  God Node 排序全部跟着错，且没有任何诊断能让人发现。两个候选都存在时现在报
+  `IMPORT_SHADOWED`，写明选了哪个、忽略了哪个。
+- `merge-annotations` 读不懂输入时只给一行错误 + 退出码 2，不再把 tomllib / pydantic
+  的 traceback（含本机绝对路径）甩到终端：畸形 TOML、缺必填字段、非 UTF-8、权限不足
+  全部收敛成 `MergeInputError`，信息里带文件名、第几条、哪个字段。`strip-comments.py`
+  对非 UTF-8 文件同样返回 2 而不是崩掉；写回改为临时文件 + `replace`（此前
+  `write_text` 中途失败会在源码里留下半截文件）。
 
 ## [1.0.1] - 2026-10-28
 

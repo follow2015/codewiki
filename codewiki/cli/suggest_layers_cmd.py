@@ -1,4 +1,4 @@
-"""``codewiki suggest-layers``：社区发现 → 建议分层（纯静态）。"""
+"""``codewiki suggest-layers``：目录优先 → 建议分层（纯静态，无需 AI）。"""
 
 from __future__ import annotations
 
@@ -18,7 +18,9 @@ def suggest_layers(args: argparse.Namespace) -> int:
     packet = load_packet_for_cli(Path(args.input))
     if packet is None:
         return 2
-    layers = _suggest_layers(packet)
+    # 用 alias 调实现：入口函数与本模块同名，直接 `suggest_layers(packet)` 会
+    # 递归调自己（AttributeError: 'Namespace' object has no attribute ...）。
+    layers = _suggest_layers(packet, max_group=args.max_group)
     out_dir = Path(args.out) if args.out else Path(args.input).parent.parent
     target_dir = out_dir / "suggestions"
     target_dir.mkdir(parents=True, exist_ok=True)

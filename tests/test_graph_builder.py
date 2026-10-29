@@ -21,6 +21,7 @@ def test_reexport_is_resolved_to_the_real_definition(mini_py):
 
     real = symbol_id("pkg/core.py", "Service")
     assert real in {n.id for n in result.nodes}
+    # app 通过包的重导出名使用 Service：IMPORTS 应指向真实定义所在模块
     imports = {
         (e.source, e.target)
         for e in result.edges
@@ -84,6 +85,7 @@ def test_unlayered_modules_are_reported(mini_py):
 
 
 def test_layer_cycle_is_an_error_level_diagnostic():
+    # 用 "import <模块>" 形态：from-import 会把 y 当名字而非模块
     files = [
         _model("a/x.py", modules=["b.y"]),
         _model("b/y.py", modules=["a.x"]),
@@ -122,6 +124,9 @@ def _model(path: str, *, modules: list[str] | None = None):
         hash="0" * 16,
         imports=[ImportFact(module=m, lineno=1, kind="import") for m in (modules or [])],
     )
+
+
+# ── 动态边推断（§0.3）─────────────────────────────────────────────────────────
 
 
 def test_dynamic_import_becomes_low_confidence_edge():
@@ -225,6 +230,8 @@ def test_multi_layer_without_any_layer_dependency_warns(tmp_path):
         {"id": "layer::adapters", "name": "适配层", "paths": ["adapters"]},
         {"id": "layer::core", "name": "核心层", "paths": ["core"]},
     ]
+    # 代码写 from app.core.s，但分析根的包名是 proj（--src 指错一层）：
+    # 绝对导入一条都解析不到，层间依赖为 0
     result = build_graph(parse_all(root), layers=layers, root_package="proj")
 
     codes = {d.code for d in result.diagnostics}
@@ -269,6 +276,9 @@ def test_unlayered_layer_is_excluded_from_layer_cycle(tmp_path):
 
     codes = [d.code for d in result.diagnostics]
     assert "LAYER_CYCLE" not in codes, result.diagnostics
+
+
+# ── H3/H4 修复回归（2026-10-23 评审）───────────────────────────────────────
 
 
 def _fm(path, *, imports=(), symbols=(), calls=()):
@@ -434,3 +444,43 @@ def test_layer_cycle_enumeration_is_bounded():
     codes = [d.code for d in builder.diagnostics]
     assert codes.count("LAYER_CYCLE") <= MAX_CYCLES_PER_COMPONENT
     assert "LAYER_CYCLE_TRUNCATED" in codes, "环多到截断时要说清楚，不能假装只有这几条"
+
+
+def test_absolute_import_prefers_repo_root_over_same_name_sibling():
+    """PEP 328：``from utils import f`` 是**绝对**导入 —— 命中仓库根的 ``utils.py``。
+
+    此前候选顺序是「包内相对 → 仓库根」，于是 ``pkg/a.py`` 里的绝对导入被
+    静默连到 ``pkg/utils.py``（置信度还是 1.0）。错误边会污染分层依赖、环检测
+    与 God Node，而且没有任何诊断提示 —— 属于"产物看着正常、内容与事实不符"。
+    """
+    from codewiki.graph import build_graph
+
+    files = [
+        _fm("pkg/a.py", imports=[("utils", "f", 1)], symbols=[("g", "g", 2)]),
+        _fm("pkg/utils.py", symbols=[("f", "f", 1)]),
+        _fm("utils.py", symbols=[("f", "f", 1)]),
+    ]
+    result = build_graph(files)
+    imports = {(e.source, e.target) for e in result.edges if e.type == EdgeType.IMPORTS}
+
+    assert (module_id("pkg/a.py"), module_id("utils.py")) in imports, (
+        f"绝对导入应命中仓库根的 utils.py，实际边: {imports}"
+    )
+    assert (module_id("pkg/a.py"), module_id("pkg/utils.py")) not in imports, (
+        "绝对导入被包内同名文件劫持 —— 与 Python 3 语义相反"
+    )
+    shadowed = [d for d in result.diagnostics if d.code == "IMPORT_SHADOWED"]
+    assert shadowed, "两个候选都在时必须报 IMPORT_SHADOWED，不能悄悄挑一个"
+
+
+def test_absolute_import_falls_back_to_sibling_when_root_has_no_match():
+    """兜底：仓库根没有同名模块时，包内同名文件仍要解析得到（否则整批 import 掉地）。"""
+    from codewiki.graph import build_graph
+
+    files = [
+        _fm("pkg/a.py", imports=[("utils", "f", 1)], symbols=[("g", "g", 2)]),
+        _fm("pkg/utils.py", symbols=[("f", "f", 1)]),
+    ]
+    result = build_graph(files)
+    imports = {(e.source, e.target) for e in result.edges if e.type == EdgeType.IMPORTS}
+    assert (module_id("pkg/a.py"), module_id("pkg/utils.py")) in imports, imports

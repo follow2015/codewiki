@@ -74,3 +74,40 @@ def test_token_estimate_overestimates_cjk():
     """宁可高估：低估会让预算形同虚设。"""
     assert estimate_tokens("中文" * 10) >= 20
     assert estimate_tokens("a" * 400) >= 100
+
+
+def test_default_cache_dir_is_user_level(monkeypatch, tmp_path):
+    """默认缓存不得落在被分析仓库里。
+
+    落在 ``--src`` 下时存在投毒通道：缓存键 = 内容 hash + 提示词版本 + 模型名，
+    同版本工具可自行复算；被审仓库预置 ``ai-cache/<key>.json`` 后，命中时
+    ``raw`` 只校验"是 JSON"就被当作模型答案采信。缓存只是加速，没有理由写进
+    别人的仓库。
+    """
+    from codewiki.ai.cache import default_cache_dir
+
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "xdg"))
+    assert default_cache_dir() == tmp_path / "xdg" / "codewiki" / "ai-cache"
+
+    monkeypatch.delenv("XDG_CACHE_HOME")
+    fallback = default_cache_dir()
+    assert fallback.is_absolute()
+    assert fallback.name == "ai-cache" and fallback.parent.name == "codewiki"
+
+
+def test_cli_default_cache_dir_ignores_src(monkeypatch, tmp_path):
+    """CLI 未给 --cache-dir 时走用户级目录，而不是 --src。"""
+    from codewiki.cli.annotate_cmd import resolve_cache_dir
+
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "xdg"))
+    resolved = resolve_cache_dir(None)
+    assert str(tmp_path / "xdg") in str(resolved), resolved
+    assert resolved.name == "ai-cache"
+
+
+def test_cli_explicit_cache_dir_keeps_root_semantics(tmp_path):
+    """--cache-dir 是"根"：缓存落在其下的 .codewiki/ai-cache（保持旧语义）。"""
+    from codewiki.ai.cache import CACHE_DIRNAME
+    from codewiki.cli.annotate_cmd import resolve_cache_dir
+
+    assert resolve_cache_dir(str(tmp_path)) == tmp_path.resolve() / CACHE_DIRNAME

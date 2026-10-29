@@ -24,12 +24,13 @@ from pathlib import Path
 from codewiki import clock
 from codewiki.analyzers import AnalyzerRegistry, build_registry, format_version_of
 from codewiki.clock import ClockError
-from codewiki.config import CONFIG_FILENAME, ConfigError
+from codewiki.config import CONFIG_FILENAME, ConfigError, LayerSpec, derive_layer_specs
 from codewiki.file_cache import CacheStats, FileModelCache, content_hash_of, mtime_ns_of
 from codewiki.graph import build_graph
-from codewiki.graph.analysis import diff_packets, god_node_diagnostics
+from codewiki.graph.analysis import diff_packets, god_node_diagnostics, module_graph_from_parts
 from codewiki.graph.index import build_index
-from codewiki.models import FileModel
+from codewiki.layering import rank_layers
+from codewiki.models import FileModel, NodeType
 from codewiki.packetio import load_packet_or_none, packet_from_parts
 from codewiki.pipeline.incremental import (
     INCOMPLETE_MARKER,
@@ -76,6 +77,9 @@ class AnalyzeRequest:
     min_confidence: float | None = None
     strict: bool = False
     timestamp: str | None = None
+    #: 分析后端注册表。``None`` ⇒ 每轮现造一份（:func:`build_registry`），
+    #: 不碰进程级 ``REGISTRY``：那份全局单例被谁改过、改的是不是本轮该用的后端，
+    #: 在"跑完发现产物不对"之前完全看不出来。测试注入一份自己的即可离线锁行为。
     registry: AnalyzerRegistry | None = None
 
 
@@ -89,6 +93,24 @@ def _backend_of(analyzer) -> str:  # noqa: ANN001
     return str(getattr(module, "BACKEND", type(analyzer).__name__))
 
 
+def _order_by_dependencies(layers: list[LayerSpec], result) -> list[LayerSpec]:
+    """给"按目录推断出来"的层补 order：按跨层依赖排（1 = 最上层）。
+
+    目录只回答"谁和谁是一组"，不回答"谁在上"——后者得看依赖方向。不补这一步，
+    层图只能按模块数从多到少排，读起来像随手排的，也就丢了分层图最重要的信息。
+    排序算法与 ``suggest-layers`` 是同一份（:func:`codewiki.layering.rank_layers`）。
+    """
+    graph = module_graph_from_parts(result.nodes, result.edges)
+    index_of = {layer.id: position for position, layer in enumerate(layers)}
+    assignment = {
+        node.id: index_of[node.layer_id]
+        for node in result.nodes
+        if node.type == NodeType.MODULE and node.layer_id in index_of
+    }
+    order_of, _cyclic = rank_layers(assignment, graph, len(layers))
+    return [layer.model_copy(update={"order": order_of[position]}) for position, layer in enumerate(layers)]
+
+
 def run(request: AnalyzeRequest) -> int:
     """执行一次分析，返回进程退出码（0 成功 / 1 运行失败 / 2 用法错误）。"""
     root = Path(request.src).resolve()
@@ -97,6 +119,7 @@ def run(request: AnalyzeRequest) -> int:
         print(f"error: --src 不是目录: {root}", file=sys.stderr)
         return 2
 
+    # 时间戳先解析：非法取值必须**当场**失败（在后面才发现，等于白跑一遍分析）。
     try:
         generated_at = clock.resolve(request.timestamp)
     except ClockError as exc:
@@ -111,15 +134,21 @@ def run(request: AnalyzeRequest) -> int:
         return 2
 
     registry = request.registry if request.registry is not None else build_registry()
+    # CLI --exclude 与配置 [analysis] exclude 是**并集**（help 写的是"追加"）。
+    # 此前是 args.exclude or cfg.exclude —— CLI 一旦出现，配置就被整体顶掉，
+    # 这是"配了排除还扫进 .workbuddy"事故的成因之一。
     excludes = tuple([*request.exclude, *cfg.analysis.exclude])
+    # [languages] 白名单：配置了就只扫描这些语言（键与 EXT_LANGUAGE 的语言标识一致）
     languages = tuple(cfg.languages) if cfg.languages else None
     sources = iter_source_files(root, extra_excludes=excludes, languages=languages)
 
+    # 增量缓存（§7）：未变更文件不重新解析。命中率进诊断 —— 缓存在不在工作必须
+    # 可观测，否则"以为有缓存"会一直错下去。
     cache = None if request.no_cache else FileModelCache(root)
     stats = CacheStats()
     models: list[FileModel] = []
-    backend_missing: list[tuple[str, str]] = []
-    parse_failed: list[tuple[str, str]] = []
+    backend_missing: list[tuple[str, str]] = []  # (路径, 语言)
+    parse_failed: list[tuple[str, str]] = []  # (路径, 异常摘要)
     for source in sources:
         try:
             analyzer = registry.get(source.language, request.backend)
@@ -154,9 +183,19 @@ def run(request: AnalyzeRequest) -> int:
             cache.set(key, model)
         models.append(model)
 
+    derived_layers: list[LayerSpec] = []
+    if not cfg.architecture.layers and cfg.architecture.auto_layers:
+        derived_layers = derive_layer_specs([model.path for model in models])
+        if derived_layers:
+            cfg = cfg.model_copy(
+                update={"architecture": cfg.architecture.model_copy(update={"layers": derived_layers})}
+            )
     layers_cfg = [
         {"id": layer.id, "name": layer.name, "paths": layer.paths} for layer in cfg.architecture.layers
     ]
+    # CLI 覆盖只在建图处生效、出图仍用配置值 —— 曾经就是这个半生效状态：用户传了
+    # --min-confidence，图上没变，增量也没察觉（它比的是配置值）。所以**算一次、
+    # 处处用同一个值**。
     min_confidence = (
         request.min_confidence if request.min_confidence is not None else cfg.analysis.min_confidence
     )
@@ -165,7 +204,18 @@ def run(request: AnalyzeRequest) -> int:
         min_confidence=min_confidence,
         layers=layers_cfg,
         root_package=root.name,
+        ts_aliases=cfg.analysis.ts_aliases,
     )
+    if derived_layers:
+        # 层序要看成图后的跨层依赖，只能在 build_graph 之后算；层归属不用改（已按
+        # 目录定好），所以这里只补 order —— 不动 layers_cfg、不重建图。
+        cfg = cfg.model_copy(
+            update={
+                "architecture": cfg.architecture.model_copy(
+                    update={"layers": _order_by_dependencies(cfg.architecture.layers, result)}
+                )
+            }
+        )
     diagnostics = list(result.diagnostics)
     if backend_missing:
         langs = sorted({lang for _, lang in backend_missing})
@@ -190,21 +240,43 @@ def run(request: AnalyzeRequest) -> int:
         )
 
     if not config_path.exists():
+        fallback = (
+            "分层已按目录结构推断（见 LAYERS_DERIVED）"
+            if derived_layers
+            else "全部模块归入虚拟层 _unlayered，分层图退化为单图"
+        )
+        diagnostics.append(
+            Diagnostic(level="info", code="CONFIG_MISSING", message=f"未提供 {CONFIG_FILENAME}：{fallback}")
+        )
+    if derived_layers:
+        ordered = sorted(cfg.architecture.layers, key=lambda layer: layer.order or 0)
+        names = ", ".join(f"{layer.name}({layer.order})" for layer in ordered[:8])
+        more = "…" if len(ordered) > 8 else ""
         diagnostics.append(
             Diagnostic(
                 level="info",
-                code="CONFIG_MISSING",
-                message=f"未提供 {CONFIG_FILENAME}：全部模块归入虚拟层 _unlayered，分层图退化为单图",
+                code="LAYERS_DERIVED",
+                message=(
+                    f"未声明分层，已按目录结构推断 {len(ordered)} 层，并按跨层依赖排出层序"
+                    f"（{names}{more}；order 1 = 最上层）。目录归类不等于架构意图："
+                    "可运行 suggest-layers 拿到带内聚度与环标注的建议，"
+                    "或在 codewiki.toml 里手写 [[architecture.layers]]（architecture.auto_layers = false 可关闭推断）"
+                ),
             )
         )
 
     if stats.total:
+        # 缓存命中数是**运行历史**的函数（上一轮跑过就命中），不是产物的属性。
+        # 放进 data/codewiki.json 的直接后果是"同一输入两次运行产物不同"，于是
+        # "增量产物 == 全量产物逐字节一致"这条验收永远做不成。所以这类运行统计
+        # 走 stdout，归档物只留"关于产物本身的结论"。
         if cache is not None:
             print(
                 f"FileModel 缓存：命中 {stats.hit} / 重新解析 {stats.miss} / 解析失败 {stats.failed}"
                 + ("" if cache.enabled else "（缓存目录不可写，已降级为无缓存）")
             )
         else:
+            # --no-cache 也必须可观测：解析失败只在统计里的话，不打印就完全不可见。
             print(f"解析统计（--no-cache）：解析 {stats.miss} / 失败 {stats.failed}")
 
     packet = packet_from_parts(
@@ -219,6 +291,7 @@ def run(request: AnalyzeRequest) -> int:
         repo_commit=repo_commit(root),
         generated_at=generated_at,
     )
+    # God Node 诊断依赖成图后的节点与边，只能在 packet 构造之后算（§4.6.3）
     god = god_node_diagnostics(
         packet,
         top_n=cfg.analysis.god_node_top_n,
@@ -227,8 +300,12 @@ def run(request: AnalyzeRequest) -> int:
     packet.diagnostics.extend(god)
     diagnostics.extend(god)
 
+    # 旧快照必须**在 write_packet 之前**读：一旦写盘覆盖，读到的就是本轮产物，
+    # diff 恒为空 ⇒ "增量"会静默退化成"什么都没重渲"（踩过一次）。
     previous_snapshot = _read_previous_snapshot(out_dir) if request.incremental else None
 
+    # 渲染指纹（§7）：本轮的"渲染输入"先记账，写进 meta 供下一轮比较 ——
+    # 判据本身在 pipeline.incremental，这里只负责喂数据。
     inputs = render_inputs(
         cfg=cfg,
         packet=packet,
@@ -237,6 +314,12 @@ def run(request: AnalyzeRequest) -> int:
     )
     packet.meta.render_inputs = inputs
 
+    # 增量渲染（§7）：只重渲"受影响闭包"内的模块，其余复用上一轮已落盘的文件。
+    # 关闭条件（任一不满足就全量）：未开 --incremental、没有上一轮快照、
+    # 上一轮被打断、渲染输入指纹有任何分量变化。
+    #
+    # 计算与诊断都必须在 **write_packet 之前**：写盘之后再往 packet.diagnostics
+    # 追加，正常路径不会回写磁盘 ⇒ 数据包里永远看不到这条（踩过一次）。
     only_modules, incremental_note = _incremental_scope(
         packet,
         enabled=request.incremental,
@@ -245,11 +328,16 @@ def run(request: AnalyzeRequest) -> int:
         interrupted=has_incomplete_marker(out_dir),
     )
     if incremental_note:
+        # stdout 而非数据包：这是"本轮怎么跑的"，不是"仓库长什么样"
         print(incremental_note)
 
+    # 标记先于快照落盘：之后任何一步失败/被杀，下一轮见到它就全量重渲。
+    # 成功路径在函数末尾清；中间的 `return 1`（出图校验失败）**故意不清** ——
+    # 那正是"产物残缺"的情形。将来新增提前返回若忘了清，代价只是多一次全量。
     write_incomplete_marker(out_dir)
     packet_path = write_packet(packet, out_dir)
 
+    # 出图：渲染 → L1 校验门 → 落盘；静态图坏图即中断（§4.3）
     diagrams = render_all(
         packet,
         out_dir,
@@ -267,14 +355,19 @@ def run(request: AnalyzeRequest) -> int:
         print("出图失败（图未通过 L1 校验），已放弃出图", file=sys.stderr)
         return 1
 
+    # Wiki：索引 + 每个模块一页（内嵌各自的上下文图）
     _write_wiki(packet, out_dir, diagrams_dir=out_dir / "diagrams", only_modules=only_modules)
 
+    # 离线看图资源：有就复制进产物，没有就记诊断（不伪造"双击可阅"）
     copy_offline_asset(out_dir, source=Path(request.offline_asset) if request.offline_asset else None)
     diagnostics.extend(asset_diagnostics(out_dir))
     write_diagnostics_md(out_dir, diagnostics)
+    # 首页架构总览 = 分层架构地图（内联 SVG；不再嵌 mermaid 巨图）
     (out_dir / INDEX_HTML).write_text(render_index_html(packet), encoding="utf-8")
+    # 模块页/诊断页的 HTML 版（点击即读；以已落盘的 .md 为源，增量复用也能补齐）
     write_module_html(out_dir)
 
+    # 全部产物齐了才清标记（--strict 的退出码属于"诊断有 error"，不是产物残缺）
     clear_incomplete_marker(out_dir)
 
     print(
@@ -350,23 +443,27 @@ def _write_wiki(packet, out_dir: Path, *, diagrams_dir: Path, only_modules: set[
     modules_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / INDEX_FILENAME).write_text(render_index(packet), encoding="utf-8")
 
+    # slug 唯一映射：页面文件名 / 图文件名 / index 链接 / 页内互链必须同源（M3）
     from codewiki.models import NodeType
     from codewiki.render.diagrams import build_slug_map
 
     slug_map = build_slug_map([n.path for n in packet.nodes if n.type == NodeType.MODULE and n.path])
 
+    # 一次建索引、全模块复用（否则每个模块都扫描全量边 ⇒ O(N×E)）
     index = build_index(packet)
     for node in packet.nodes:
         if node.type.value != "Module" or not node.path:
             continue
         page_path = modules_dir / f"{slug_map[node.path]}.md"
         if only_modules is not None and node.id not in only_modules and page_path.exists():
-            continue
+            continue  # 未受影响且已有页 ⇒ 复用
         diagram_path = diagrams_dir / "modules" / f"{slug_map[node.path]}.mmd"
         diagram_text = diagram_path.read_text(encoding="utf-8") if diagram_path.exists() else None
         page = render_module_page(packet, node.id, diagram_text=diagram_text, index=index)
         (modules_dir / f"{slug_map[node.path]}.md").write_text(page, encoding="utf-8")
 
+    # 过期页面清理：模块删除/改名/口径变化后，旧 slug 的页面只会越积越多
+    # （IPIP 实测残留 111 页含空 slug 的 ".md"）。以当前 slug 全集为准。
     prune_stale_pages(out_dir, set(slug_map.values()))
 
 

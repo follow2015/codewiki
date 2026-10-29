@@ -19,9 +19,48 @@ import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from pydantic import ValidationError
+
 from codewiki.schemas import Annotation
 
 ANNOTATIONS_HEADER = "[[annotations]]"
+
+
+class MergeInputError(ValueError):
+    """建议文件/主配置读不懂 —— 用户输入问题，CLI 要报人话而不是甩堆栈。"""
+
+
+def _brief(exc: ValidationError) -> str:
+    """pydantic 的报错面向开发者，这里只取第一条并翻译成"哪个字段错了"。"""
+    first = (exc.errors() or [{}])[0]
+    loc = ".".join(str(part) for part in first.get("loc", ())) or "字段"
+    return f"{loc}: {first.get('msg', '校验失败')}"
+
+
+def _read_toml(path: Path, *, what: str) -> dict:
+    try:
+        return tomllib.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError as exc:
+        raise MergeInputError(f"{what}不存在: {path}") from exc
+    except UnicodeDecodeError as exc:
+        raise MergeInputError(f"{what}不是 UTF-8 文本: {path}") from exc
+    except OSError as exc:
+        raise MergeInputError(f"{what}读不了: {path}（{exc.strerror or exc}）") from exc
+    except tomllib.TOMLDecodeError as exc:
+        raise MergeInputError(f"{what}不是合法 TOML: {path} —— {exc}") from exc
+
+
+def _annotations_in(raw: dict, path: Path, *, what: str) -> list[Annotation]:
+    items = raw.get("annotations") or []
+    if not isinstance(items, list):
+        raise MergeInputError(f"{what}的 annotations 必须是数组: {path}")
+    parsed: list[Annotation] = []
+    for index, item in enumerate(items, start=1):
+        try:
+            parsed.append(Annotation.model_validate(item))
+        except ValidationError as exc:
+            raise MergeInputError(f"{what}第 {index} 条注解不合法: {path} —— {_brief(exc)}") from exc
+    return parsed
 
 
 @dataclass
@@ -36,9 +75,12 @@ class MergeOutcome:
 
 
 def load_suggestions(path: Path) -> list[Annotation]:
-    """读建议文件里的 ``[[annotations]]``（读不到就是空列表，不猜）。"""
-    raw = tomllib.loads(path.read_text(encoding="utf-8"))
-    return [Annotation.model_validate(item) for item in raw.get("annotations") or []]
+    """读建议文件里的 ``[[annotations]]``。
+
+    畸形 TOML / 缺必填字段都收敛成 ``MergeInputError``：这是用户输入问题，
+    不该让 tomllib 或 pydantic 的堆栈直接出现在终端上。
+    """
+    return _annotations_in(_read_toml(path, what="建议文件"), path, what="建议文件")
 
 
 def _split_blocks(text: str) -> tuple[str, list[str]]:
@@ -60,8 +102,7 @@ def existing_annotations(config_path: Path) -> list[Annotation]:
     """读主配置里已有的注解（文件不存在则为空）。"""
     if not config_path.exists():
         return []
-    raw = tomllib.loads(config_path.read_text(encoding="utf-8"))
-    return [Annotation.model_validate(item) for item in raw.get("annotations") or []]
+    return _annotations_in(_read_toml(config_path, what="主配置"), config_path, what="主配置")
 
 
 def plan_merge(
@@ -85,6 +126,7 @@ def plan_merge(
 
         protected = [a for a in current if a.source == "human" or a.reviewed]
         if protected:
+            # 规则 2：受保护注解 --force 也不动
             outcome.protected.append(suggestion.target)
             continue
 
@@ -107,7 +149,7 @@ def plan_merge(
             )
             continue
 
-        outcome.added.append(suggestion)
+        outcome.added.append(suggestion)  # force：以建议为准
         outcome.conflicts.append(
             {
                 "target": suggestion.target,
@@ -193,6 +235,7 @@ def render_merge_report(outcome: MergeOutcome) -> str:
 
 
 __all__ = [
+    "MergeInputError",
     "MergeOutcome",
     "apply_merge",
     "existing_annotations",

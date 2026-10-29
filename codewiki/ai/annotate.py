@@ -33,10 +33,13 @@ from codewiki.schemas import Annotation, Diagnostic
 SUGGEST_FILENAME = "annotations.suggest.toml"
 SUGGEST_SUBDIR = "suggestions"
 
+#: 单个模块取证时最多喂给模型的字符数（防止一个巨型文件吃光预算）
 MAX_SOURCE_CHARS = 12_000
 
+#: 解析失败重试时回喂的原文长度上限（够模型认出自己写了什么即可）
 MAX_PARSE_ECHO_CHARS = 2_000
 
+#: 结论里最多取多少个标识符锚点做证据核对
 MAX_ANCHORS = 8
 
 
@@ -55,7 +58,7 @@ class Suggestion:
             label=self.label,
             note=self.note,
             source="ai",
-            reviewed=False,
+            reviewed=False,  # §十二：AI 注解默认未审阅
         )
 
 
@@ -64,8 +67,10 @@ class AnnotateResult:
     suggestions: list[Suggestion] = field(default_factory=list)
     diagnostics: list[Diagnostic] = field(default_factory=list)
     skipped: list[str] = field(default_factory=list)
+    #: 待外部作答的模块（外置推理模式）：不是失败，是"这一轮还没有答案"
     pending: list[str] = field(default_factory=list)
     degraded: bool = False
+    #: 本轮是否真的**没调模型**（缓存命中或外置作答命中）—— 供 CLI 如实汇报
     model_calls: int = 0
 
 
@@ -211,14 +216,18 @@ def _parse_suggestions(raw: str) -> ParseOutcome:
     unknown = [str(t) for t in (unknown_raw or [])]
 
     if dropped and not items and not unknown:
+        # 有条目、但一条都立不住 ⇒ 形状不对（不是"没什么可说"），值得重试
         return ParseOutcome(ok=False, error=f"modules 里 {dropped} 个条目缺少 target/note 或不是对象")
     return ParseOutcome(suggestions=items, unknown=unknown, ok=True)
 
 
+#: 代码标识符的粗抽取（锚点来源）：字母/下划线开头，允许数字与下划线
 _TOKEN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
+#: 反引号里的片段（模型常用来包代码名）
 _BACKTICK = re.compile(r"`([^`]{1,80})`")
 
+#: 太泛的缩写在哪个文件里都能撞上，当锚点等于没有判据
 _ANCHOR_STOPWORDS = frozenset(
     {
         "API",
@@ -430,7 +439,7 @@ def annotate_modules(
     *,
     src_root: Path | None,
     client: OpenAICompatClient,
-    cache_root: Path | None = None,
+    cache_dir: Path | None = None,
     budget_tokens: int | None = None,
     top_n: int = 30,
     audit=None,
@@ -446,8 +455,10 @@ def annotate_modules(
         return result
 
     layers, annotations = build_context(packet, cfg, src_root=src_root)
-    cache = ResultCache(cache_root) if cache_root else None
+    cache = ResultCache(cache_dir) if cache_dir else None
     budget = TokenBudget(budget_tokens)
+    #: 支持原生 JSON 模式就要求它（模型漏写 JSON 的概率显著下降）；
+    #: 网关不认时客户端会去掉重发并标注降级 —— 见 ``AI_JSON_MODE_UNSUPPORTED``。
     json_kwargs: dict = (
         {"response_format": {"type": "json_object"}} if getattr(client, "supports_json_mode", False) else {}
     )
@@ -481,6 +492,7 @@ def annotate_modules(
         ]
 
         content_hash = digest_of(f"{module['path']}::{snippet}")
+        # 邻居 hash 必须进键：本模块一字未改、但上下游变了，注解依据就已经不同
         key = cache_key(
             content_hash=content_hash,
             model=client.model,
@@ -496,8 +508,8 @@ def annotate_modules(
                 from_cache = bool(raw)
 
         if raw and not _parse_suggestions(raw).ok:
-            raw = ""
-            from_cache = False
+            raw = ""  # 坏缓存当未命中：宁可花钱重问，也不能一直复用解析不了的答案
+            from_cache = False  # 这一轮必须把新答案写回去，否则坏缓存会一直留着
 
         if not raw:
             raw, status = _ask(
@@ -517,6 +529,7 @@ def annotate_modules(
 
         outcome = _parse_suggestions(raw)
         if not outcome.ok:
+            # 带**错误原因**重试一次：只说"格式不对"，模型只会把同样的错再犯一遍
             retry_prompt = render_annotate_repair(error=outcome.error, previous=raw[:MAX_PARSE_ECHO_CHARS])
             retry_messages = [
                 *messages,
@@ -551,9 +564,11 @@ def annotate_modules(
                 raw = retry_raw
                 from_cache = False
             else:
-                outcome = retried
+                outcome = retried  # 保留第二次的原因：它通常更接近真实问题
 
         if not outcome.ok:
+            # 解析不了就**不写缓存** —— 缓存一段解析不了的原文等于把这个模块
+            # 永久锁死在失败状态（每次重跑都命中同一段坏答案）。
             result.diagnostics.append(
                 Diagnostic(
                     level="warning",
@@ -587,6 +602,8 @@ def annotate_modules(
         accepted = False
         for suggestion in outcome.suggestions:
             if suggestion.target != module["id"]:
+                # 模型返回了非本模块的 target —— 一次只问一个模块，串台即幻觉，
+                # 写下去会把 A 的结论安到 B 头上。
                 result.diagnostics.append(
                     Diagnostic(
                         level="warning",

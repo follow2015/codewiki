@@ -14,6 +14,7 @@ import argparse
 
 from codewiki import __version__
 from codewiki.config import CONFIG_FILENAME
+from codewiki.layering import DEFAULT_MAX_GROUP
 
 from .agent_cmd import agent
 from .analyze_cmd import analyze
@@ -94,7 +95,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     annotate_cmd.add_argument("--src", help="源码根目录（只读取证；不给则仅依据数据包事实）")
     annotate_cmd.add_argument("--out", help="建议输出目录（默认数据包所在产物根目录）")
-    annotate_cmd.add_argument("--cache-dir", help="AI 缓存根目录（默认 --src 或当前目录）")
+    annotate_cmd.add_argument(
+        "--cache-dir",
+        help="AI 缓存根目录（默认 ~/.cache/codewiki/ai-cache；刻意不落在 --src 里，避免被审仓库预置缓存）",
+    )
     annotate_cmd.add_argument("--model", help="模型名（优先于 OPENAI_MODEL 与配置）")
     annotate_cmd.add_argument("--base-url", help="覆盖 [ai] base_url（本地 Ollama / vLLM 内网网关）")
     annotate_cmd.add_argument(
@@ -135,9 +139,15 @@ def build_parser() -> argparse.ArgumentParser:
     diff_cmd.add_argument("range", nargs="?", help="git 范围（如 v1.2.0..HEAD），不传则用 --base/--head")
     diff_cmd.set_defaults(func=diff)
 
-    suggest = sub.add_parser("suggest-layers", help="社区发现 → 建议分层（纯静态）")
+    suggest = sub.add_parser("suggest-layers", help="目录优先 → 建议分层（纯静态）")
     suggest.add_argument("--input", default="wiki-output/data/codewiki.json")
     suggest.add_argument("--out", help="建议输出目录")
+    suggest.add_argument(
+        "--max-group",
+        type=int,
+        default=DEFAULT_MAX_GROUP,
+        help=f"单层模块数上限，超过就继续按子目录下钻（默认 {DEFAULT_MAX_GROUP}）",
+    )
     suggest.set_defaults(func=suggest_layers)
 
     merge_layers_cmd_parser = sub.add_parser("merge-layers", help="把建议分层合并进 codewiki.toml")
@@ -172,6 +182,9 @@ def build_parser() -> argparse.ArgumentParser:
         help="信任配置里的 [ai] base_url/model/write_back（默认忽略：该文件来自被分析仓库）",
     )
     agent_cmd.add_argument("--max-rounds", type=int, default=10, help="最大取证轮次（防无限循环）")
+    # 通用 shell 默认关闭：它把"只读"寄托在选项白名单上，而白名单只能穷举已想到的
+    # 形态，是这套工具里攻击面最大的一个。真实需求用两三个有类型的 git 工具就能覆盖。
+    # 这个开关是过渡期的逃生口，一个发布周期后删除。
     agent_cmd.add_argument(
         "--allow-shell",
         action="store_true",

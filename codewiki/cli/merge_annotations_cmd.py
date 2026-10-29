@@ -10,8 +10,8 @@ import argparse
 import sys
 from pathlib import Path
 
+from codewiki.ai.merge import MergeInputError, render_merge_report
 from codewiki.ai.merge import merge_annotations as _merge
-from codewiki.ai.merge import render_merge_report
 from codewiki.config import CONFIG_FILENAME
 
 
@@ -22,6 +22,11 @@ def merge_annotations(args: argparse.Namespace) -> int:
         return 2
     config_path = Path(args.config).resolve() if args.config else Path.cwd() / CONFIG_FILENAME
 
-    outcome = _merge(config_path, suggest_path, force=args.force, dry_run=args.dry_run)
+    try:
+        outcome = _merge(config_path, suggest_path, force=args.force, dry_run=args.dry_run)
+    except MergeInputError as exc:
+        # 文件读不懂是用户输入问题：给 2（1 留给"合并结果有冲突，需要人看一眼"）
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
     print(render_merge_report(outcome))
     return 1 if outcome.conflicts else 0

@@ -163,6 +163,7 @@ def test_budget_stops_and_says_so(mini_py):
     """预算耗尽要**停手并说清楚**，不是继续烧到没钱为止。"""
     target = _first_target(mini_py)
     client = FakeClient([_reply(target) for _ in range(10)])
+    # FakeClient 每次回复都记 30 tokens ⇒ budget=5 时在第一次调用后即超额
     result = annotate_modules(
         _packet(mini_py), _cfg(), src_root=mini_py, client=client, top_n=10, budget_tokens=5
     )
@@ -179,6 +180,8 @@ def test_cache_avoids_second_call(mini_py, tmp_path):
     用例却全绿（此前正是如此 —— 把 `ResultCache.get` 改成永不命中，它仍通过）。
     所以第二轮注入一个**空回复**的 client：缓存真生效的话它一次都不会被调用。
     """
+    # target 必须是本轮真会问的模块：写死 "mod::app.py" 会被"串台"守卫丢弃，
+    # 于是第一轮就没有建议 —— 用例看着在跑，其实什么都没测到。
     replies = [_reply(_first_target(mini_py))]
     first = annotate_modules(
         _packet(mini_py),
@@ -186,11 +189,11 @@ def test_cache_avoids_second_call(mini_py, tmp_path):
         src_root=mini_py,
         client=FakeClient(list(replies)),
         top_n=1,
-        cache_root=tmp_path,
+        cache_dir=tmp_path,
     )
-    second_client = FakeClient([])
+    second_client = FakeClient([])  # 空回复：真去调模型就拿不到任何建议
     second = annotate_modules(
-        _packet(mini_py), _cfg(), src_root=mini_py, client=second_client, top_n=1, cache_root=tmp_path
+        _packet(mini_py), _cfg(), src_root=mini_py, client=second_client, top_n=1, cache_dir=tmp_path
     )
 
     assert second_client.calls == [], "第二轮仍调用了模型 ⇒ 缓存没命中（钱白花了）"
@@ -210,6 +213,7 @@ def test_unknown_modules_are_not_invented(mini_py):
 
 def test_prompt_injection_in_source_is_flagged(mini_py, tmp_path):
     """源码里的注入文本要被**标记**（§5.4 第 6 条），并且标注流程继续跑完。"""
+    # 刻意用副本：直接往共享 fixture 目录里写文件会污染后续用例（会多一个模块）
     repo = tmp_path / "repo"
     shutil.copytree(mini_py, repo)
     (repo / "pkg" / "evil.py").write_text(
@@ -252,7 +256,7 @@ def test_rendered_toml_is_parseable_and_marks_unreviewed():
     note = '含"引号"与\n换行，还有 \\ 反斜杠'
     text = render_suggestions_toml([Suggestion(target="mod::a.py", label="A", note=note, evidence=[])])
     assert "reviewed = false" in text
-    parsed = tomllib.loads(text)
+    parsed = tomllib.loads(text)  # 不抛即通过
     assert parsed["annotations"][0]["note"] == note, "转义后必须还原成原文"
 
 
@@ -278,6 +282,12 @@ def test_top_n_limits_scope(mini_py):
     annotate_modules(_packet(mini_py), _cfg(), src_root=mini_py, client=client, top_n=1)
     assert len(client.calls) <= 1
 
+
+# ── 邻居上下文（Prompt + 缓存键）───────────────────────────────────────────
+#
+# 只喂本模块源码时，模型看不出"谁在用它、它在用谁"，注解只能写成"这是一个
+# 工具模块"。补上上下游之后，**缓存键必须同步变化**：本模块一字未改、但它
+# 依赖的模块变了，注解依据已经不同 —— 沿用旧答案就是"注解与图谱对不上"。
 
 from codewiki.ai.cache import cache_key  # noqa: E402
 from codewiki.ai.neighbors import module_neighbors, render_neighbors  # noqa: E402
@@ -333,14 +343,17 @@ def test_cache_misses_when_neighbors_change(mini_py, tmp_path):
         src_root=mini_py,
         client=FakeClient([_reply(target)]),
         top_n=1,
-        cache_root=tmp_path,
+        cache_dir=tmp_path,
     )
     changed = packet.model_copy(
         update={"edges": [*packet.edges, Edge(source=target, target="mod::zzz.py", type=EdgeType.IMPORTS)]}
     )
     client = FakeClient([])
-    annotate_modules(changed, _cfg(), src_root=mini_py, client=client, top_n=1, cache_root=tmp_path)
+    annotate_modules(changed, _cfg(), src_root=mini_py, client=client, top_n=1, cache_dir=tmp_path)
     assert client.calls != [], "邻居变了却命中旧缓存 ⇒ 注解会与图谱对不上"
+
+
+# ── 解析失败：带错误重试一次 ───────────────────────────────────────────────
 
 
 def test_parse_failure_is_retried_once_with_the_error(mini_py):
@@ -362,7 +375,7 @@ def test_parse_failure_twice_is_reported_and_not_cached(mini_py, tmp_path):
     target = _first_target(mini_py)
     client = FakeClient(["bad", "still bad"])
     result = annotate_modules(
-        _packet(mini_py), _cfg(), src_root=mini_py, client=client, top_n=1, cache_root=tmp_path
+        _packet(mini_py), _cfg(), src_root=mini_py, client=client, top_n=1, cache_dir=tmp_path
     )
 
     assert result.suggestions == []
@@ -396,13 +409,17 @@ def test_unparseable_cache_entry_is_treated_as_miss(mini_py, tmp_path):
     ResultCache(tmp_path).set(key, {"raw": "这不是 JSON", "model": "fake-model"})
 
     client = FakeClient([_reply(target)])
-    result = annotate_modules(packet, _cfg(), src_root=mini_py, client=client, top_n=1, cache_root=tmp_path)
+    result = annotate_modules(packet, _cfg(), src_root=mini_py, client=client, top_n=1, cache_dir=tmp_path)
     assert client.calls, "坏缓存必须当未命中"
     assert [s.target for s in result.suggestions] == [target]
 
+    # 而且新答案要**写回**同一个键：否则下一轮还得再花一次钱
     again = FakeClient([])
-    annotate_modules(packet, _cfg(), src_root=mini_py, client=again, top_n=1, cache_root=tmp_path)
+    annotate_modules(packet, _cfg(), src_root=mini_py, client=again, top_n=1, cache_dir=tmp_path)
     assert again.calls == [], "坏缓存被重问之后没有写回好答案"
+
+
+# ── 证据要"支持结论"，不只是"行号存在" ──────────────────────────────────
 
 
 def test_conclusion_anchors_pick_code_names_only():
@@ -410,6 +427,7 @@ def test_conclusion_anchors_pick_code_names_only():
 
     anchors = conclusion_anchors("这里用 `Svc` 做编排，并把 MAX_RETRY 交给 mark_stale 处理")
     assert "Svc" in anchors and "MAX_RETRY" in anchors and "mark_stale" in anchors
+    # 普通英文词不该成为锚点（哪个文件里都能撞上，等于没有判据）
     assert "the" not in anchors and "JSON" not in anchors
 
 
@@ -432,6 +450,7 @@ def _evidence_payload(target: str, *, note: str, path: str, lines: list[int]) ->
 def test_evidence_that_does_not_mention_the_anchor_is_rejected(mini_py):
     """行号真实、但所引行里没有结论提到的代码名 ⇒ 引用不支持结论。"""
     target = _first_target(mini_py)
+    # MAX_RETRY 在 pkg/core.py:23；这里引第 4 行（class Base:）
     payload = _evidence_payload(target, note="`MAX_RETRY` 控制重试次数上限", path="pkg/core.py", lines=[4])
     result = annotate_modules(
         _packet(mini_py), _cfg(), src_root=mini_py, client=FakeClient([payload]), top_n=1
