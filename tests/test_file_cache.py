@@ -140,3 +140,21 @@ def test_key_covers_backend():
     assert FileModelCache.key("a.py", 123, "h1", "ast", parser_version=1) != FileModelCache.key(
         "a.py", 123, "h1", "regex", parser_version=1
     )
+
+
+def test_hidden_directories_are_never_scanned_as_source():
+    """任意隐藏目录都不是源码 —— 固定清单追不上新增的 CI / agent 目录。
+
+    实测 ipip arch-e0：`.husky`、`.hypothesis`、`.github`、`.gitea`、`.agent`、
+    `.vscode`、`.superpowers` 挨个漏进来，各自被当成一个"架构层"。把它们画进架构图
+    只会让人第一眼就不信这张图，所以规则要按形状定（以点开头的目录），而不是按名单。
+    """
+    for rel in (
+        ".github/actions/deploy.js",
+        ".gitea/workflows/ci.yml",
+        ".agent/skills/x.py",
+        "a/.hidden/deep.js",
+    ):
+        assert is_excluded(rel), rel
+    assert is_excluded("src/.eslintrc.js") is False
+    assert is_excluded("src/main.py") is False

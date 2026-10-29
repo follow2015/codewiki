@@ -123,7 +123,6 @@ def merge_layers(config_path: Path, suggest_path: Path, *, dry_run: bool = False
     suggested = load_suggested_layers(suggest_path)
     outcome = plan_merge_layers(suggested, cfg.architecture.layers)
     if not dry_run:
-        # 有重叠就**不写**：要求人工先选择（规则 2）
         if outcome.overlaps:
             outcome.changed = False
             return outcome

@@ -157,6 +157,54 @@ def render_repair_user(*, issues: list[str], diagram: str) -> str:
 
 AGENT_SYSTEM = agent_system_prompt()
 
+DRAFT_SYSTEM = """你是软件架构分层助手。你的任务是把一个仓库的模块**归并成若干架构层**。
+
+输入给你两样东西：
+1. 目录普查：每个顶层目录组（组名、路径、模块数、代表文件）；
+2. 组间依赖：`A -> B : N 条`，表示 A 组里有 N 处引用 B 组。
+
+硬性规则：
+1. **可以跨目录归并**。层按职责划分，不按目录划分 —— 例如 `app/api` 与
+   `gateway` 可能同属"接口层"。目录树只是线索，依赖方向才是主要依据。
+2. **paths 必须是输入里出现过的真实路径前缀**，一个字都不能编。宁可不给这一层，
+   也不要写一个不存在的目录。
+3. **层名唯一**，且用中文职责名（如"接口层"/"服务层"/"数据层"/"前端"），
+   不要用 `part1`/`misc` 这类无信息量的名字。
+4. 层数控制在 4–10 层。少于 4 层通常没分开，多于 10 层人读不动。
+5. 不要输出 order —— 层序由依赖方向自动计算，你给的顺序不作数。
+6. 依赖是**单向**的：A 依赖 B 说明 A 在上、B 在下。若两组互相依赖，考虑把它们
+   并成一层（这是你自己的判断，不必强行合并）。
+7. 输出必须是**纯 JSON**，不要代码块围栏，不要额外解释。
+
+输出 JSON 形状：
+{"layers":[{"name":"接口层","paths":["app/api","gateway"],"why":"被前端与外部调用，向下依赖服务层"}],
+ "notes":"<可选：哪些目录你拿不准，建议人复核>"}
+"""
+
+DRAFT_USER_TEMPLATE = """仓库共 {total} 个模块。
+
+目录普查：
+{census}
+
+组间依赖（A -> B 表示 A 引用 B）：
+{edges}
+
+请归并成 4–10 个架构层，按上面的 JSON 形状作答。"""
+
+
+def render_draft_user(*, census: str, edges: str, total: int) -> str:
+    """渲染起草分层用的用户提示（缺数据时给显式占位，不静默省略）。"""
+    return DRAFT_USER_TEMPLATE.format(
+        total=total,
+        census=census or "（没有可用的目录信息）",
+        edges=edges or "（没有跨组依赖）",
+    )
+
+
+def draft_system_prompt() -> str:
+    """起草分层的系统提示。单独一层函数：未来要注入项目术语时只改这里。"""
+    return DRAFT_SYSTEM
+
 
 __all__ = [
     "AGENT_SYSTEM",
@@ -164,11 +212,15 @@ __all__ = [
     "ANNOTATE_SYSTEM",
     "ANNOTATE_USER_TEMPLATE",
     "DIAGRAM_REPAIR_TEMPLATE",
+    "DRAFT_SYSTEM",
+    "DRAFT_USER_TEMPLATE",
     "SEQUENCE_SYSTEM",
     "SEQUENCE_USER_TEMPLATE",
     "agent_system_prompt",
+    "draft_system_prompt",
     "render_annotate_repair",
     "render_annotate_user",
+    "render_draft_user",
     "render_repair_user",
     "render_sequence_user",
 ]

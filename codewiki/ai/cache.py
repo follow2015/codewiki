@@ -22,13 +22,6 @@ from pathlib import Path
 
 CACHE_DIRNAME = ".codewiki/ai-cache"
 
-#: 提示词版本：改 Prompt 就必须 +1，否则旧缓存会盖住新行为。
-#:
-#: annotate-v2：取证片段改为**带行号**（此前 read_file 输出不带行号，evidence
-#: 只能靠模型自己数行，"行号存在"校验因此形同虚设）。行号进了 Prompt ⇒ 语义变了
-#: ⇒ v1 的答案不能再复用。
-#: annotate-v3：用户提示新增**上下游邻居**段 ⇒ 同一份源码的作答依据变了
-#: （此前只看得见本文件，现在能看见谁依赖它），v2 的答案同样不能再复用。
 PROMPT_VERSION = "annotate-v3"
 
 
@@ -82,7 +75,7 @@ class ResultCache:
         try:
             return json.loads(path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
-            return None  # 坏缓存当未命中，不阻断
+            return None
 
     def set(self, key: str, value: dict) -> None:
         self.dir.mkdir(parents=True, exist_ok=True)

@@ -25,7 +25,6 @@ def merge_annotations(args: argparse.Namespace) -> int:
     try:
         outcome = _merge(config_path, suggest_path, force=args.force, dry_run=args.dry_run)
     except MergeInputError as exc:
-        # 文件读不懂是用户输入问题：给 2（1 留给"合并结果有冲突，需要人看一眼"）
         print(f"error: {exc}", file=sys.stderr)
         return 2
     print(render_merge_report(outcome))

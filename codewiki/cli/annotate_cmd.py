@@ -28,11 +28,8 @@ from codewiki.trust import load_trusted_config
 
 from .context import trusted
 
-#: write_back 策略闭集（§5.2 第 5 条）
 WRITE_BACK_POLICIES = frozenset({"review-file", "dry-run", "confirm", "auto"})
 
-#: 退出码 3：本轮有模块等待外部作答（外置推理模式）。与 1（模型不可用）区分开 ——
-#: "还没答" 和 "答不了" 对调用方是两种动作：前者重跑，后者换环境。
 EXIT_PENDING = 3
 
 
@@ -62,8 +59,6 @@ def annotate(args: argparse.Namespace) -> int:
     model = resolve_model(cli_value=args.model, config_value=cfg.ai.model)
     deferred_root = Path(args.deferred).resolve() if getattr(args, "deferred", None) else None
     if not model and deferred_root is not None:
-        # 外置作答不需要真实模型名；但它的 model 仍参与 ai-cache 键，所以用固定
-        # 的 "agent" 而不是空串 —— 空串会让"谁答的"在缓存里彻底无从追溯。
         model = DEFAULT_MODEL
     if not model:
         print(
@@ -82,7 +77,6 @@ def annotate(args: argparse.Namespace) -> int:
     try:
         packet = load_packet(input_path)
     except PacketError as exc:
-        # 数据包问题属用户输入错误：给 2 而不是 1（1 留给"分析跑失败了"）
         print(f"error: {exc}", file=sys.stderr)
         return 2
 
@@ -90,8 +84,6 @@ def annotate(args: argparse.Namespace) -> int:
     out_dir.mkdir(parents=True, exist_ok=True)
     cache_dir = resolve_cache_dir(args.cache_dir)
 
-    # base_url 只认 CLI / 环境变量：codewiki.toml 来自被分析仓库，是不可信输入
-    # （hostile 仓库可借配置把 env 里的 API Key 以 Bearer 头送走，外部评审实测面）。
     if deferred_root is not None:
         if args.base_url:
             print("warning: --deferred 模式不发网络请求，--base-url 已忽略", file=sys.stderr)
@@ -131,8 +123,6 @@ def annotate(args: argparse.Namespace) -> int:
     suggest_path = write_suggestions(result.suggestions, out_dir)
     write_diagnostics_md(out_dir / "suggestions", diagnostics)
 
-    # 有待作答模块时不执行"会落地"的策略：把半截建议合进主配置，事后没人分得清
-    # 哪些结论是完整的。写建议文件仍然照做（已有部分本来就要留给人审）。
     if result.pending and write_back in ("confirm", "auto"):
         print(
             f"warning: {len(result.pending)} 个模块待作答，本轮降级为 review-file（不自动合并）",
@@ -149,7 +139,6 @@ def annotate(args: argparse.Namespace) -> int:
         suggest_path = write_suggestions(kept, out_dir)
         print(f"审阅后保留 {len(kept)} 条")
     elif write_back == "auto":
-        # auto 仍然走正规合并（受保护注解不会被动），不是"AI 直写配置"
         outcome = merge_annotations(config_path, suggest_path, dry_run=False)
         print(render_merge_report(outcome))
     else:
@@ -164,9 +153,6 @@ def annotate(args: argparse.Namespace) -> int:
         return 1
 
     if result.pending:
-        # 退出码 3 不是失败：请求已落盘，作答后重跑同一条命令即可。
-        # 清单用 client 的**全量**未作答（含更早几轮留下的），而不是本轮的
-        # result.pending —— 后者只反映"这次碰到的"，容易让人以为只剩这几个。
         items = client.pending() if isinstance(client, DeferredClient) else []
         report = render_pending_report(items, root=deferred_root or Path.cwd())
         if report:
@@ -182,5 +168,5 @@ def _confirm(suggestion) -> bool:
     print(suggestion.note)
     try:
         return input("采纳？(y/N) ").strip().lower() == "y"
-    except EOFError:  # 非交互环境（CI / 管道）：不采纳，不猜
+    except EOFError:
         return False

@@ -96,7 +96,7 @@ def test_exact_alias_does_not_prefix_match_longer_specifier():
     other = build_graph(
         [
             _file(HOME, [_import_from("@configX", "x")]),
-            _file("frontend-new/src/config/app.ts"),  # 目标真实存在，否则"误连"根本不会发生
+            _file("frontend-new/src/config/app.ts"),
         ],
         ts_aliases={"@config": "frontend-new/src/config/app.ts"},
     )

@@ -126,7 +126,6 @@ def plan_merge(
 
         protected = [a for a in current if a.source == "human" or a.reviewed]
         if protected:
-            # 规则 2：受保护注解 --force 也不动
             outcome.protected.append(suggestion.target)
             continue
 
@@ -149,7 +148,7 @@ def plan_merge(
             )
             continue
 
-        outcome.added.append(suggestion)  # force：以建议为准
+        outcome.added.append(suggestion)
         outcome.conflicts.append(
             {
                 "target": suggestion.target,

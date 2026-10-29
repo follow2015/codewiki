@@ -19,9 +19,6 @@ import networkx as nx
 
 UNLAYERED_LAYER_ID = "layer::_unlayered"
 
-#: 单层模块数上限：超过就继续按子目录下钻；下钻不动（平铺目录）才交给社区发现。
-#: 自动兜底分层与 ``suggest-layers`` **共用这一个数** —— 一个 90 个模块的"层"
-#: 到底算不算一层，不该取决于你敲了哪条命令。
 DEFAULT_MAX_GROUP = 30
 
 
@@ -35,8 +32,6 @@ def longest_prefix_match(rel_path: str, layers: Iterable[tuple[str, list[str]]])
     for layer_id, paths in layers:
         for pattern in paths:
             prefix = _normalize(pattern)
-            # 根（"" / "."）匹配一切，且长度为 0 ⇒ 永远是最短前缀，只在没有更细的
-            # 层时才生效 —— 这正是"整仓兜底层"该有的行为。
             hit = prefix == "" or rel_path == prefix or rel_path.startswith(prefix + "/")
             if hit and (best is None or len(prefix) > best[0]):
                 best = (len(prefix), layer_id)
@@ -64,8 +59,6 @@ def layer_of(
 
 OTHER_GROUP_NAME = "other"
 ROOT_GROUP_NAME = "root"
-#: 目录名与虚拟层重名时必须避让：``layer::_unlayered`` 是保留 id，撞上会把
-#: "真实目录"和"没匹配到任何层"混成一件事（诊断、渲染、环检测全部失真）。
 RESERVED_GROUP_NAMES = frozenset({UNLAYERED_LAYER_ID.removeprefix("layer::")})
 
 
@@ -89,7 +82,12 @@ def unique_names(names: Iterable[str], *, reserved: Iterable[str] = RESERVED_GRO
 
     分配顺序即输入顺序（调用方先排序），所以结果确定；``taken`` 预先收进全部
     原始名字，避免改名后又撞上后面某个目录的真名。
+
+    **签名收 ``Iterable`` 就必须对迭代器安全**：``taken`` 先用 ``set(names)`` 把
+    生成器耗尽，再由下面的循环遍历同一个对象，会拿到空结果 —— 一个"传生成器就
+    静默返回 []"的坑。现有调用方恰好都传 list，所以一直没暴露。
     """
+    names = list(names)
     reserved_set = set(reserved)
     taken = reserved_set | set(names)
     seen: set[str] = set()
@@ -136,9 +134,7 @@ def _descend_oversized(groups: dict[str, list[str]], max_group: int) -> None:
             continue
         split = _split_by_next_segment(prefix, members)
         if set(split) == {prefix}:
-            continue  # 全是直接躺在本目录下的文件：下钻不动，认了
-        # 只有一个子目录也要下钻（`svc/` → `svc/api/` 才能再到 v1/v2）；前缀每轮
-        # 变长一段，段数是有限的 ⇒ 一定停。
+            continue
         del groups[prefix]
         groups.update(split)
         queue.extend(child for child in split if child != prefix and len(split[child]) > max_group)

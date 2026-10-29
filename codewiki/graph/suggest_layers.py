@@ -25,7 +25,6 @@ from codewiki.graph.analysis import module_graph
 from codewiki.layering import DEFAULT_MAX_GROUP, DirGroup, directory_groups, rank_layers, unique_names
 from codewiki.schemas import DataPacket
 
-#: 产物文件名（§十一：suggestions/suggested-layers.toml）
 SUGGESTED_LAYERS_FILENAME = "suggested-layers.toml"
 
 MIN_COMMUNITY = 3
@@ -101,7 +100,6 @@ def suggest_layers(
     for group in directory_groups(list(paths_by_node.values()), max_group=max_group):
         ids = DirGroup(group.name, group.prefixes, sorted(id_of_path[p] for p in group.modules))
         groups.extend(_split_big_group(ids, graph, seed=seed, max_group=max_group))
-    # 拆分出来的 ``X.partN`` 仍可能与某个真实目录同名 ⇒ 拆完再走一次同一份去重
     for group, name in zip(groups, unique_names([g.name for g in groups]), strict=True):
         group.name = name
 
@@ -114,7 +112,6 @@ def suggest_layers(
         internal = sum(1 for u, v in graph.edges() if u in member_set and v in member_set)
         external = sum(1 for u, v in graph.edges() if (u in member_set) ^ (v in member_set))
         module_paths = sorted(paths_by_node[m] for m in group.modules)
-        # 整目录成组时给目录前缀（可读、可维护）；拆分出来的组只能列文件
         paths = group.prefixes if group.prefixes else module_paths
         layers.append(
             SuggestedLayer(

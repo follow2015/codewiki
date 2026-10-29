@@ -36,8 +36,32 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--version", action="version", version=f"codewiki {__version__}")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    init_cmd = sub.add_parser("init", help="生成 codewiki.toml 模板（不覆盖已存在的配置）")
+    init_cmd = sub.add_parser("init", help="生成 codewiki.toml（带 --src 时按真实目录与依赖起草分层）")
     init_cmd.add_argument("--path", default=".", help="生成位置（默认当前目录）")
+    init_cmd.add_argument("--src", help="仓库根目录：给了就扫描并起草分层（不给则只吐模板）")
+    init_cmd.add_argument("--force", action="store_true", help="允许覆盖已存在的配置")
+    ai_group = init_cmd.add_mutually_exclusive_group()
+    ai_group.add_argument(
+        "--ai",
+        dest="ai",
+        action="store_true",
+        default=None,
+        help="强制让模型按职责归并（结果会逐条校验；缺模型配置时报错）",
+    )
+    ai_group.add_argument(
+        "--no-ai",
+        dest="ai",
+        action="store_false",
+        help="强制只用目录骨架（即使环境里配了 AI）",
+    )
+    init_cmd.add_argument("--model", help="模型名（也可用环境变量 OPENAI_MODEL）")
+    init_cmd.add_argument("--base-url", help="OpenAI 兼容网关地址（也可用 OPENAI_BASE_URL）")
+    init_cmd.add_argument("--deferred", help="外置推理目录：导出请求由 agent 作答，零凭据零网络")
+    init_cmd.add_argument(
+        "--max-group", type=int, default=None, help="单层模块数上限（默认按总量自动取，约总量的 1/3）"
+    )
+    init_cmd.add_argument("--exclude", action="append", help="追加跳过的目录名（可多次）")
+    init_cmd.add_argument("--backend", default="auto", help="auto | ast | treesitter | regex")
     init_cmd.set_defaults(func=init)
 
     analyze_cmd = sub.add_parser("analyze", help="纯静态分析，产出标准数据包")
@@ -182,9 +206,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="信任配置里的 [ai] base_url/model/write_back（默认忽略：该文件来自被分析仓库）",
     )
     agent_cmd.add_argument("--max-rounds", type=int, default=10, help="最大取证轮次（防无限循环）")
-    # 通用 shell 默认关闭：它把"只读"寄托在选项白名单上，而白名单只能穷举已想到的
-    # 形态，是这套工具里攻击面最大的一个。真实需求用两三个有类型的 git 工具就能覆盖。
-    # 这个开关是过渡期的逃生口，一个发布周期后删除。
     agent_cmd.add_argument(
         "--allow-shell",
         action="store_true",

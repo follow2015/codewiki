@@ -21,7 +21,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from codewiki.layering import DEFAULT_MAX_GROUP, directory_groups, layer_of
 
-_EXTRA_FORBID = ConfigDict(extra="forbid")  # 未知键必须报错（M4）：拼错段名/字段名静默忽略等于配置白写
+_EXTRA_FORBID = ConfigDict(extra="forbid")
 
 CONFIG_FILENAME = "codewiki.toml"
 SCHEMA_EXPORT_NAME = "codewiki.schema.json"
@@ -52,17 +52,9 @@ class AnalysisSection(BaseModel):
 
     min_confidence: float = Field(default=0.5, ge=0.0, le=1.0)
     max_nodes: int = Field(default=300, gt=0)
-    #: 低于该置信度的边不进宏观图（§4.2.1 第 5 步）
     exclude: list[str] = Field(default_factory=list)
-    #: God Node 诊断（§4.6.3）：同时满足"高扇入扇出"与"跨层占比 ≥ 阈值"才报
     god_node_top_n: int = Field(default=10, gt=0)
     god_node_cross_layer_ratio: float = Field(default=0.5, ge=0.0, le=1.0)
-    #: TS/JS 模块别名（``{"@/*": "frontend-new/src/*"}``）。键以 ``*`` 结尾 = 前缀
-    #: 通配，否则**精确匹配**；值里可用 ``*`` 承接通配到的剩余部分。
-    #:
-    #: 别名**只认这里**，不去读 tsconfig：tsconfig 是 JSONC（带注释）且 ``paths``
-    #: 相对 ``baseUrl``，猜错的后果是把第三方包装成本地模块（``@tanstack/react-query``
-    #: 被 ``@/*`` 吞掉）—— 那种错连比"没连"更难发现。
     ts_aliases: dict[str, str] = Field(default_factory=dict)
 
 
@@ -105,22 +97,14 @@ class AiSection(BaseModel):
     model_config = _EXTRA_FORBID
 
     enabled: bool = False
-    #: 以下三项**只认操作者**（CLI / 环境变量）：codewiki.toml 位于被分析仓库，
-    #: 作者可控，让它决定端点、模型或写入策略等于把 API Key 与"人工审阅"交出去。
-    #: 规则实现见 :mod:`codewiki.trust`，写在文件里会被忽略并给出 warning。
     base_url: str | None = None
     model: str | None = None
-    #: 单轮硬上限（§5.5 max_tokens_per_run）；None = 不限（不推荐）
     budget_tokens: int | None = None
     max_retries: int = Field(default=2, ge=0)
     timeout_s: float = Field(default=60.0, gt=0)
-    #: 标注取前 N 个热点模块（§5.2 第 1 步，默认 30）
     top_n: int = Field(default=30, gt=0)
-    #: write_back 策略：review-file（默认）/ dry-run / confirm / auto
     write_back: str = "review-file"
-    #: 拓扑感知缓存键（§5.5 可选优化项，默认关闭）
     cache_include_topology: bool = False
-    #: 是否启用 L2 真实渲染校验（§4.3，需 mermaid-cli）
     l2_validate: bool = False
 
 
@@ -201,11 +185,8 @@ class ConfigError(Exception):
         super().__init__(f"{message}{location}{chr(10)}  {hint}" if hint else f"{message}{location}")
 
 
-#: 3.11–3.13 的 ``TOMLDecodeError`` **没有** ``lineno`` 属性，位置只写在消息尾巴里：
-#: ``... (at line 1, column 9)``。3.14 才补上 ``msg / doc / pos / lineno / colno``。
 _TOML_POS = re.compile(r"(?:at\s+line|line)\s*(\d+)", re.I)
 
-#: 解析器跑到文件末尾才发现的错，消息里只有 ``at end of document``，没有行号。
 _TOML_AT_END = re.compile(r"at end of document", re.I)
 
 
@@ -236,7 +217,7 @@ def _toml_error_line(exc: tomllib.TOMLDecodeError, text: str | None = None) -> i
 def load_config(path: Path) -> CodewikiConfig:
     """读取并校验配置；失败抛 :class:`ConfigError`（含行列号与修复建议）。"""
     if not path.exists():
-        return CodewikiConfig()  # 无配置也能跑（默认值），诊断里提示"未使用配置"
+        return CodewikiConfig()
 
     text = path.read_text(encoding="utf-8")
     try:

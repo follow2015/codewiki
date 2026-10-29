@@ -39,15 +39,15 @@ from codewiki.ai.tools import (
 @pytest.mark.parametrize(
     "command",
     [
-        "git diff HEAD --output=../pwned_git.txt",  # 评审者实测越狱 #1
-        "git show HEAD --output=/tmp/pwned.txt",  # 评审者实测越狱 #2
-        "git diff HEAD --output ../pwned.txt",  # 分离取值形式
+        "git diff HEAD --output=../pwned_git.txt",
+        "git show HEAD --output=/tmp/pwned.txt",
+        "git diff HEAD --output ../pwned.txt",
         "git log --pathspec-from-file=/etc/hostname",
-        "grep --file=/etc/hostname pattern a.txt",  # 评审者实测外读 #3
-        "grep -f /etc/hostname pattern a.txt",  # 分离取值形式
+        "grep --file=/etc/hostname pattern a.txt",
+        "grep -f /etc/hostname pattern a.txt",
         "find . -fprint /tmp/pwned.txt",
         "find . -newer /etc/hostname -print",
-        "git --git-dir=/tmp/elsewhere/.git log",  # 全局选项换仓
+        "git --git-dir=/tmp/elsewhere/.git log",
         "git -C /etc log",
         "git log --unknown-flag",
         "grep --zap x a.txt",
@@ -90,9 +90,6 @@ def test_option_whitelist_keeps_legit_exploration(command, tmp_path):
     assert argv[0] == command.split()[0]
 
 
-# ── F3：base_url 来源与协议 ─────────────────────────────────────────────────
-
-
 @pytest.mark.parametrize("bad", ["file:///etc/passwd", "ftp://x", "gopher://y", "/local/sock"])
 def test_client_rejects_non_http_base_url(bad):
     """urllib 默认接受 file:// 等协议 —— 构造期必须钉死 http/https。"""
@@ -110,23 +107,18 @@ def test_config_base_url_is_ignored(monkeypatch):
     （否则 hostile 仓库可把 env API Key 以 Bearer 头送走）。"""
     monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
     base_url, warning = resolve_base_url(cli_value=None, config_value="https://evil.example.com/v1")
-    assert base_url == OpenAICompatClient(model="m").base_url  # 回落到默认
+    assert base_url == OpenAICompatClient(model="m").base_url
     assert warning and "base_url" in warning
 
-    # CLI 显式指定优先；配置值被无视
     base_url, warning = resolve_base_url(
         cli_value="https://ok.example.com/v1", config_value="https://evil.example.com/v1"
     )
     assert base_url == "https://ok.example.com/v1"
     assert warning is None
 
-    # 环境变量可用；配置缺失且无 CLI 时安静回落
     monkeypatch.setenv("OPENAI_BASE_URL", "https://env.example.com/v1")
     base_url, warning = resolve_base_url(cli_value=None, config_value=None)
     assert base_url == "https://env.example.com/v1" and warning is None
-
-
-# ── F4：提示词注入加固 ──────────────────────────────────────────────────────
 
 
 def test_wrap_untrusted_neutralizes_delimiter_smuggling():
@@ -171,9 +163,6 @@ def test_injection_scan_flags_delimiter_smuggling():
     assert scan_prompt_injection(f"x {DELIM_END} y"), "分隔符本身就是注入信号"
 
 
-# ── Agent 健壮性 ────────────────────────────────────────────────────────────
-
-
 class _RecordingAudit:
     def __init__(self):
         self.records: list[dict] = []
@@ -205,8 +194,8 @@ def test_agent_survives_non_dict_action(mini_py):
 
     client = FakeClient(
         [
-            json.dumps({"thought": "t", "action": "hello"}),  # action 不是 dict
-            json.dumps({"thought": "t", "action": {"tool": "read_file"}}),  # args 不是 dict
+            json.dumps({"thought": "t", "action": "hello"}),
+            json.dumps({"thought": "t", "action": {"tool": "read_file"}}),
             json.dumps({"thought": "t", "final": "ok"}),
         ]
     )
@@ -286,9 +275,6 @@ def test_search_files_param_is_jailed(tmp_path):
     assert search_codebase("needle", repo_root=tmp_path, files=["a.txt"]) != []
 
 
-# ── 打包与发布元数据 ────────────────────────────────────────────────────────
-
-
 def test_python_floor_is_3_11():
     """3.14.7 下限挡住绝大多数用户（代码只用了 3.11 特性：tomllib / datetime.UTC）。"""
     data = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
@@ -320,5 +306,5 @@ def test_init_command_writes_valid_template(tmp_path):
     assert main(["init", "--path", str(tmp_path)]) == 0
     cfg = tmp_path / "codewiki.toml"
     assert cfg.is_file()
-    load_config(cfg)  # 生成的模板自己必须先合法（不能提示用户跑一个产出废配置的命令）
+    load_config(cfg)
     assert main(["init", "--path", str(tmp_path)]) == 2, "已存在不覆盖"

@@ -21,7 +21,6 @@ def test_reexport_is_resolved_to_the_real_definition(mini_py):
 
     real = symbol_id("pkg/core.py", "Service")
     assert real in {n.id for n in result.nodes}
-    # app 通过包的重导出名使用 Service：IMPORTS 应指向真实定义所在模块
     imports = {
         (e.source, e.target)
         for e in result.edges
@@ -85,7 +84,6 @@ def test_unlayered_modules_are_reported(mini_py):
 
 
 def test_layer_cycle_is_an_error_level_diagnostic():
-    # 用 "import <模块>" 形态：from-import 会把 y 当名字而非模块
     files = [
         _model("a/x.py", modules=["b.y"]),
         _model("b/y.py", modules=["a.x"]),
@@ -124,9 +122,6 @@ def _model(path: str, *, modules: list[str] | None = None):
         hash="0" * 16,
         imports=[ImportFact(module=m, lineno=1, kind="import") for m in (modules or [])],
     )
-
-
-# ── 动态边推断（§0.3）─────────────────────────────────────────────────────────
 
 
 def test_dynamic_import_becomes_low_confidence_edge():
@@ -230,8 +225,6 @@ def test_multi_layer_without_any_layer_dependency_warns(tmp_path):
         {"id": "layer::adapters", "name": "适配层", "paths": ["adapters"]},
         {"id": "layer::core", "name": "核心层", "paths": ["core"]},
     ]
-    # 代码写 from app.core.s，但分析根的包名是 proj（--src 指错一层）：
-    # 绝对导入一条都解析不到，层间依赖为 0
     result = build_graph(parse_all(root), layers=layers, root_package="proj")
 
     codes = {d.code for d in result.diagnostics}
@@ -276,9 +269,6 @@ def test_unlayered_layer_is_excluded_from_layer_cycle(tmp_path):
 
     codes = [d.code for d in result.diagnostics]
     assert "LAYER_CYCLE" not in codes, result.diagnostics
-
-
-# ── H3/H4 修复回归（2026-10-23 评审）───────────────────────────────────────
 
 
 def _fm(path, *, imports=(), symbols=(), calls=()):

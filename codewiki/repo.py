@@ -62,8 +62,19 @@ def language_of(path: str) -> str:
 
 
 def is_excluded(rel_path: str, extra: tuple[str, ...] = ()) -> bool:
-    """是否跳过（默认清单 + 配置追加的 exclude）。"""
+    """是否跳过（默认清单 + 配置追加的 exclude + **任意隐藏目录**）。
+
+    隐藏目录单独一条规则，是因为固定清单永远追不上：实测仓库里 `.husky`、
+    `.hypothesis`、`.github`、`.gitea`、`.agent`、`.vscode`、`.superpowers`
+    挨个漏进来，各自被当成一个"架构层"或"模块"——CI 配置和 agent 提示词不是产品
+    代码，把它们画进架构图只会让人第一眼就不信这张图。
+
+    只对**父路径段**生效：文件名以点开头是另一回事（`.eslintrc.js` 是文件不是
+    目录）。
+    """
     parts = rel_path.split("/")
+    if any(part.startswith(".") for part in parts[:-1]):
+        return True
     blocked = set(DEFAULT_EXCLUDES) | set(extra)
     return any(part in blocked for part in parts)
 

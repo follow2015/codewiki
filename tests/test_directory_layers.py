@@ -23,9 +23,6 @@ def _paths(prefix: str, n: int) -> list[str]:
     return [f"{prefix}/m{i}.py" for i in range(n)]
 
 
-# ---------- directory_groups ----------
-
-
 def test_groups_follow_top_level_directories():
     groups = {g.name: g for g in directory_groups(_paths("ai", 4) + _paths("cli", 3) + _paths("graph", 2))}
     assert set(groups) == {"ai", "cli", "graph"}
@@ -72,9 +69,6 @@ def test_derived_specs_use_dot_for_root_and_unique_ids():
     by_name = {s.name: s for s in specs}
     assert by_name["root"].paths == ["."]
     assert len({s.id for s in specs}) == len(specs)
-
-
-# ---------- 管线：无配置兜底 ----------
 
 
 def _write_repo(root):
@@ -130,9 +124,6 @@ def test_declared_layers_are_never_overridden(tmp_path):
     assert "LAYERS_DERIVED" not in [d["code"] for d in packet["diagnostics"]]
 
 
-# ---------- suggest-layers：层序与环 ----------
-
-
 def _packet(edges: list[tuple[str, str]], paths: list[str]):
     nodes = [Node(id=f"mod::{p}", type=NodeType.MODULE, path=p, layer_id="layer::x") for p in paths]
     return packet_from_parts(
@@ -170,7 +161,7 @@ def test_output_is_sorted_top_down():
 
 
 def test_circular_layers_share_an_order_and_are_flagged():
-    edges = [*CHAIN_EDGES, ("core/m0.py", "svc/m0.py")]  # core 反向依赖 svc → 环
+    edges = [*CHAIN_EDGES, ("core/m0.py", "svc/m0.py")]
     layers = {layer.name: layer for layer in suggest_layers(_packet(edges, CHAIN_PATHS))}
     assert layers["svc"].order == layers["core"].order
     assert layers["svc"].cyclic and layers["core"].cyclic and not layers["cli"].cyclic
@@ -217,19 +208,10 @@ def test_merge_block_keeps_order():
     assert "order = 2" in block
 
 
-# ---------- 层名唯一（层 id 就是 layer::<name>）----------
-#
-# 目录名与合成组名撞车是**真实可复现**的：仓库里恰好有个 `other/` 或 `root/`
-# 目录时，`directory_groups` 会给出两个同名组 ⇒ 两个 LayerSpec 拿到同一个
-# `layer::other`。后果不是报错而是静默合并：两个组的模块归进同一层，渲染时同 id
-# 的 subgraph 出现两次。`_unlayered` 更糟：那是虚拟层的保留 id。
-
-
 def test_duplicate_group_names_are_made_unique():
     groups = directory_groups(["other/o1.py", "other/o2.py", "other/o3.py", "a/x.py", "b/y.py"])
     names = [group.name for group in groups]
     assert len(names) == len(set(names)), names
-    # 大的那个（真实 other/ 目录）保住原名，合成组让位
     assert min(names) == "other" or "other" in names
 
 
@@ -288,12 +270,6 @@ def test_analyze_keeps_real_other_dir_apart_from_the_merged_bucket(tmp_path):
     by_path = {n["path"]: n["layer_id"] for n in packet["nodes"] if n["type"] == "Module"}
     assert by_path["a/x.py"] != by_path["other/o1.py"]
     assert by_path["b/y.py"] != by_path["other/o1.py"]
-
-
-# ---------- 粒度一致 + 派生层带层序 ----------
-#
-# 同一种判断（"这个组还算一层吗""哪层在上"）不该因为入口不同给出不同答案：
-# 兜底分层和 suggest-layers 共用 DEFAULT_MAX_GROUP 与同一份 rank_layers。
 
 
 def test_oversized_group_descends_further():
@@ -385,3 +361,15 @@ def test_cli_exposes_max_group():
 
     args = build_parser().parse_args(["suggest-layers", "--max-group", "7"])
     assert args.max_group == 7
+
+
+def test_unique_names_accepts_a_generator():
+    """签名收 ``Iterable`` 就要对迭代器安全。
+
+    ``unique_names`` 内部先用 ``set(names)`` 收「已被占用的名字」，再由循环遍历
+    同一个对象 —— 传生成器时第一句就把它耗尽，于是**静默返回空列表**。现有调用方
+    恰好都传 list，所以一直没暴露；起草分层（``layering_draft``）传的是生成器。
+    """
+    from codewiki.layering import unique_names
+
+    assert unique_names(name for name in ["a", "a", "b"]) == ["a", "a-2", "b"]

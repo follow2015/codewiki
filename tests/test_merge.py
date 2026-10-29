@@ -63,7 +63,6 @@ def test_merge_appends_and_config_stays_loadable(tmp_path, suggest):
     outcome = merge_annotations(config, suggest)
 
     assert len(outcome.added) == 2
-    # round-trip：追加不能把用户的配置写坏
     cfg = load_config(config)
     assert cfg.project.name == "demo"
     assert {a.target for a in cfg.annotations} == {"mod::pkg/core.py", "mod::app.py"}

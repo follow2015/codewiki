@@ -36,7 +36,6 @@ def test_example_config_is_valid_and_matches_layers_by_longest_prefix():
     assert cfg.layer_of("app/services/order.py") == "layer::服务层"
     assert cfg.layer_of("app/models/device.py") == "layer::数据层"
     assert cfg.layer_of("app/other/x.py") == "layer::_unlayered"
-    # 最长前缀：services 下的深层路径仍属服务层
     assert cfg.layer_of("app/services/deep/nested.py") == "layer::服务层"
 
 
@@ -100,8 +99,8 @@ def test_line_number_survives_python_without_lineno_attr(tmp_path, monkeypatch):
 @pytest.mark.parametrize(
     ("bad_text", "expected_line"),
     [
-        ("a = 1\nb", 2),  # 缺等号，解析器跑到第 2 行行尾才发现
-        ("a = 'unterminated\n", 2),  # 引号没闭合，同理
+        ("a = 1\nb", 2),
+        ("a = 'unterminated\n", 2),
     ],
 )
 def test_end_of_document_line_matches_across_python_versions(tmp_path, monkeypatch, bad_text, expected_line):
@@ -194,9 +193,6 @@ def test_root_path_variants_are_equivalent():
         assert cfg.layer_of("a/b.py") == "layer::全部", pattern
 
 
-# ── M4 修复回归（2026-10-23 评审）：未知配置键必须报错，不得静默忽略 ────────
-
-
 def test_unknown_top_level_key_is_rejected(tmp_path):
     """拼错段名（如 [architect]）必须显式失败，静默忽略等于配置白写。"""
     from codewiki.config import ConfigError, load_config
@@ -215,7 +211,7 @@ def test_unknown_section_key_is_rejected(tmp_path):
     from codewiki.config import ConfigError, load_config
 
     p = tmp_path / "codewiki.toml"
-    p.write_text("[analysis]\nmin_confidnce = 0.6\n", encoding="utf-8")  # 拼错
+    p.write_text("[analysis]\nmin_confidnce = 0.6\n", encoding="utf-8")
     try:
         load_config(p)
     except ConfigError as exc:
@@ -234,7 +230,7 @@ def test_longest_prefix_wins_even_when_the_fine_layer_comes_last():
     cfg = CodewikiConfig(
         architecture=ArchitectureSection(
             layers=[
-                LayerSpec(name="全部", paths=["."]),  # 兜底层写在前面
+                LayerSpec(name="全部", paths=["."]),
                 LayerSpec(name="适配层", paths=["adapters"]),
             ]
         )

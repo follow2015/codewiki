@@ -1,5 +1,10 @@
 # codewiki 配置示例（复制到项目根目录为 codewiki.toml）
 # 全部段落都可缺省：不提供本文件也能跑（默认值 + 诊断提示）。
+#
+# 不想手写？`codewiki init --src .` 会扫描本仓库起草一份：
+#   目录骨架 + 按依赖排好的层序 + 点名互相依赖/成环的层；加 `--ai` 让模型按职责归并。
+#   生成的配置自带 [languages]、[analysis] exclude 与从 tsconfig 推断的 ts_aliases，
+#   可直接 `codewiki analyze --config`。
 
 [project]
 name = "我的项目"
