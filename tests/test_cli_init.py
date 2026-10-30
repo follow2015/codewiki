@@ -210,9 +210,117 @@ def test_no_ai_forces_the_static_skeleton(tmp_path, monkeypatch):
     assert "未调用模型" in (out / "codewiki.toml").read_text(encoding="utf-8")
 
 
+def _write_structure_noise(root) -> None:  # noqa: ANN001
+    """给仓库加上四类"不是产品代码"的目录，各自代表一条自动排除判据。"""
+    (root / "tests").mkdir()
+    (root / "tests" / "test_api.py").write_text("from app.api import handler\n", encoding="utf-8")
+    (root / "archive").mkdir()
+    (root / "archive" / "old.py").write_text("Z = 1\n", encoding="utf-8")
+    (root / "deploy-copy").mkdir()
+    (root / "deploy-copy" / ".git").mkdir()
+    (root / "deploy-copy" / "copy.py").write_text("Y = 2\n", encoding="utf-8")
+    (root / "lib-9.3.0").mkdir()
+    (root / "lib-9.3.0" / "third.py").write_text("W = 3\n", encoding="utf-8")
+
+
+def test_init_auto_excludes_structure_noise(tmp_path):
+    """结构性的"不是产品代码"必须自动排除 —— 手写 31 条 exclude 的工具没人会用。
+
+    实测 `configs/ipip.toml` 的 31 条 exclude 里，除了两三个项目特例，其余全是：独立
+    仓库克隆、测试、迁移、文档、部署、存档、带版本号的第三方包。这些都是**结构事实**，
+    不需要领域知识就能判。
+
+    断言穿透到 paths：配置里写了 exclude 但扫描没生效，是最容易发生也最难发现的假成功。
+    """
+    from codewiki.cli.init_cmd import _scan
+
+    repo = tmp_path / "repo"
+    _write_repo(repo)
+    _write_structure_noise(repo)
+
+    out = tmp_path / "cfg" / "repo.toml"
+    assert main(["init", "--src", str(repo), "--out", str(out)]) == 0
+
+    cfg = load_config(out)
+    assert set(cfg.analysis.exclude) >= {"tests", "archive", "deploy-copy", "lib-9.3.0"}
+
+    paths, *_ = _scan(repo, backend="auto", excludes=tuple(cfg.analysis.exclude))
+    leaked = [p for p in paths if p.split("/")[0] in {"tests", "archive", "deploy-copy", "lib-9.3.0"}]
+    assert not leaked, f"自动排除没穿透到扫描：{leaked}"
+
+    assert any(p.startswith("app/") for p in paths)
+    assert not (out.parent / "codewiki.toml").exists()
+
+
+def test_out_writes_an_external_config_path(tmp_path):
+    """外挂式配置（`configs/ipip.toml`）必须能由 init 直接产出。
+
+    以前只有 ``--path``，文件名被钉死成 ``codewiki.toml`` —— 想放 `configs/<项目>.toml`
+    就只能手写或改完名再搬，而"手写"正是这套工具想消灭的动作。
+    """
+    repo = tmp_path / "repo"
+    _write_repo(repo)
+
+    target = tmp_path / "configs" / "ipip.toml"
+    assert main(["init", "--src", str(repo), "--out", str(target)]) == 0
+    assert target.exists()
+    assert load_config(target).architecture.layers
+
+
+def test_no_auto_exclude_keeps_every_directory(tmp_path):
+    """自动排除是**默认**不是**强制**：判断错了要能一键关掉。"""
+    repo = tmp_path / "repo"
+    _write_repo(repo)
+    _write_structure_noise(repo)
+
+    assert main(["init", "--src", str(repo), "--path", str(tmp_path), "--no-auto-exclude"]) == 0
+    cfg = load_config(tmp_path / "codewiki.toml")
+    assert "tests" not in (cfg.analysis.exclude or [])
+    counted = [path for layer in cfg.architecture.layers for path in layer.paths]
+    assert any("tests" in path for path in counted), counted
+
+
+def test_languages_whitelist_skips_other_languages(tmp_path):
+    """不分析前端时用 ``--languages python`` 表达，而不是让人数一遍前端目录名。"""
+    from codewiki.cli.init_cmd import _scan
+
+    repo = tmp_path / "repo"
+    _write_repo(repo)
+
+    out = tmp_path / "cfg"
+    assert main(["init", "--src", str(repo), "--path", str(out), "--languages", "python"]) == 0
+    cfg = load_config(out / "codewiki.toml")
+    assert set(cfg.languages) == {"python"}
+
+    paths, *_ = _scan(repo, backend="auto", excludes=(), only_languages=("python",))
+    assert paths and all(p.endswith(".py") for p in paths)
+
+
+def test_aliases_into_excluded_dirs_are_dropped(tmp_path):
+    """排除了前端目录还留着指向它的别名，是一条永远用不到的死配置。
+
+    裸跑 ipip 时真实发生过：`ts_aliases = { "@/*" = "frontend-new/src/*" }`，而
+    frontend-new 已经在 exclude 里 —— 读的人还得花时间想它为什么在。
+    """
+    repo = tmp_path / "repo"
+    _write_repo(repo)
+    (repo / "web" / "tsconfig.json").write_text(
+        json.dumps({"compilerOptions": {"baseUrl": ".", "paths": {"@/*": ["./src/*"]}}}),
+        encoding="utf-8",
+    )
+
+    without = tmp_path / "keep"
+    assert main(["init", "--src", str(repo), "--path", str(without)]) == 0
+    text = (without / "codewiki.toml").read_text(encoding="utf-8")
+    assert "ts_aliases" in text, "没排除前端时别名必须保留（否则前端模块间零依赖）"
+
+    dropped = tmp_path / "drop"
+    assert main(["init", "--src", str(repo), "--path", str(dropped), "--exclude", "web"]) == 0
+    assert "ts_aliases" not in (dropped / "codewiki.toml").read_text(encoding="utf-8")
+
+
 def test_missing_backend_is_reported_not_silently_dropped(tmp_path, capsys):
     """没装 tree-sitter 时 TS 会被整片跳过 —— 必须明说，否则看起来像"仓库没有前端"。
-
     CI 刻意不装 tree-sitter（`.gitea/workflows/ci.yml`），实测 1322 个模块里
     700 个被静默丢掉，起草结果直接少一个"前端"层。
     """

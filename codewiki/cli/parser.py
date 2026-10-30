@@ -61,6 +61,20 @@ def build_parser() -> argparse.ArgumentParser:
         "--max-group", type=int, default=None, help="单层模块数上限（默认按总量自动取，约总量的 1/3）"
     )
     init_cmd.add_argument("--exclude", action="append", help="追加跳过的目录名（可多次）")
+    init_cmd.add_argument(
+        "--out",
+        help="输出文件的完整路径（外挂式配置用，如 configs/ipip.toml）；给了就忽略 --path",
+    )
+    init_cmd.add_argument(
+        "--languages",
+        help="只起草这些语言的模块（逗号分隔，如 python 或 python,go）；不分析前端时用它，"
+        "比逐个 --exclude 前端目录省事",
+    )
+    init_cmd.add_argument(
+        "--no-auto-exclude",
+        action="store_true",
+        help="关闭按仓库结构自动排除（独立仓库 / 测试 / 迁移 / 文档 / 部署 / 存档等）",
+    )
     init_cmd.add_argument("--backend", default="auto", help="auto | ast | treesitter | regex")
     init_cmd.set_defaults(func=init)
 

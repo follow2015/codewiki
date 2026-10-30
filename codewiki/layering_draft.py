@@ -458,6 +458,7 @@ def render_config_toml(
     *,
     project_name: str,
     excludes: list[str] | None = None,
+    auto_excludes: list[str] | None = None,
     ts_aliases: dict[str, str] | None = None,
     languages: list[str] | None = None,
 ) -> str:
@@ -481,6 +482,11 @@ def render_config_toml(
         head += ["", *_language_block(languages)]
     analysis: list[str] = []
     if excludes:
+        if auto_excludes:
+            analysis.append(
+                "# 下列目录由 init 按仓库结构自动排除（独立仓库 / 测试 / 迁移 / 文档 / 部署 / 存档等）；"
+            )
+            analysis.append("# 判断有误就从数组里删掉，删完重跑 analyze 会扫回来。")
         analysis.append(f"exclude = {_toml_array(sorted(set(excludes)))}")
     if ts_aliases:
         pairs = ", ".join(

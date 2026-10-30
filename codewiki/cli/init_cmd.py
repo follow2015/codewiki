@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 from pathlib import Path
 
@@ -25,10 +26,34 @@ from codewiki.config import CONFIG_FILENAME
 from codewiki.graph import build_graph
 from codewiki.layering_draft import directory_draft, render_config_toml
 from codewiki.models import EdgeType
-from codewiki.repo import iter_source_files
+from codewiki.repo import DEFAULT_EXCLUDES, iter_source_files, nested_repo_dirs
 from codewiki.tsaliases import detect_aliases
 
 EXIT_PENDING = 3
+
+_STRUCTURE_RULES: dict[str, str] = {
+    "tests": "测试目录",
+    "test": "测试目录",
+    "__tests__": "测试目录",
+    "spec": "测试目录",
+    "specs": "测试目录",
+    "scripts": "脚本/工具目录",
+    "migrations": "数据库迁移",
+    "alembic": "数据库迁移",
+    "docs": "文档目录",
+    "doc": "文档目录",
+    "deploy": "部署配置",
+    "backups": "备份/存档",
+    "backup": "备份/存档",
+    "archive": "备份/存档",
+    "logs": "运行时目录",
+    "instance": "运行时目录",
+}
+
+_VERSIONED = re.compile(r"-\d+(\.\d+)+$")
+
+_TEST_DATA_PREFIX = ("test-data", "testdata", "fixtures")
+
 
 _MODULE_EDGE_TYPES = frozenset({EdgeType.IMPORTS, EdgeType.CALLS, EdgeType.USES_DYNAMIC})
 
@@ -71,6 +96,7 @@ def _scan(
     *,
     backend: str,
     excludes: tuple[str, ...],
+    only_languages: tuple[str, ...] | None = None,
     registry=None,  # noqa: ANN001 - 测试可注入只支持部分语言的注册表
 ) -> tuple[list[str], list[tuple[str, str]], list[str], dict[str, int]]:
     """扫描仓库，返回 ``(模块路径, 模块间依赖边, 实际用到的语言, 缺后端的语言计数)``。
@@ -94,9 +120,8 @@ def _scan(
     models = []
     languages: set[str] = set()
     missing: dict[str, int] = {}
-    for source in iter_source_files(
-        root, extra_excludes=excludes, languages=tuple(sorted(set(EXT_LANGUAGE.values())))
-    ):
+    wanted = only_languages or tuple(sorted(set(EXT_LANGUAGE.values())))
+    for source in iter_source_files(root, extra_excludes=excludes, languages=wanted):
         try:
             analyzer = registry.get(source.language, backend)
         except KeyError:
@@ -121,6 +146,43 @@ def _scan(
     return [model.path for model in models], deps, sorted(languages), missing
 
 
+def _auto_excludes(root: Path) -> list[tuple[str, str]]:
+    """按仓库结构推断该排掉的顶层目录，返回 ``[(目录名, 理由)]``，已排序。
+
+    为什么值得做：`configs/ipip.toml` 里 31 条 ``exclude`` 全是这一类目录。**手写 31 条
+    和手写 2 条，区别就是这工具还要不要用**。而这些目录的"不是产品代码"是结构事实，
+    不该让人一条条数。
+
+    只认三类**事实**，不猜职责：
+
+    1. 子目录自带 ``.git`` ⇒ 独立仓库（部署副本 / 另一份克隆），扫进来是重复计数；
+    2. 顶层目录名是公认的非产品目录（tests / scripts / migrations / docs / deploy / 备份）；
+    3. 目录名带版本号（``ntc_templates-9.3.0``）或测试数据前缀 ⇒ 第三方包与数据快照。
+
+    职责归并（哪些产品目录该并成一层）**不在这里做**：目录名推不出业务含义，硬猜只会
+    让配置看起来更完整、实际上更错 —— 那是 ``--ai`` / ``--deferred`` 的活。
+
+    已被 :data:`codewiki.repo.DEFAULT_EXCLUDES` 与"隐藏目录"规则覆盖的，这里不再重复
+    列出：``analyze`` 本来就跳过它们，写进配置只会让 exclude 数组变长而毫无作用。
+    """
+    reasons: dict[str, str] = {}
+    for name in nested_repo_dirs(root):
+        reasons[name] = "独立仓库（自带 .git），扫进来是重复计数"
+    for child in sorted(root.iterdir()):
+        if not child.is_dir() or child.is_symlink():
+            continue
+        name = child.name
+        if name in reasons or name.startswith(".") or name in DEFAULT_EXCLUDES:
+            continue
+        if name in _STRUCTURE_RULES:
+            reasons[name] = _STRUCTURE_RULES[name]
+        elif _VERSIONED.search(name):
+            reasons[name] = "带版本号的第三方包快照"
+        elif name.startswith(_TEST_DATA_PREFIX):
+            reasons[name] = "测试数据"
+    return sorted(reasons.items())
+
+
 def _client_for(args: argparse.Namespace):  # noqa: ANN202 - OpenAICompatClient | DeferredClient
     """按 ``--deferred`` / ``--model`` 装配 client；缺参数时返回 ``(None, 错误文案)``。"""
     deferred_root = Path(args.deferred).resolve() if args.deferred else None
@@ -140,9 +202,19 @@ def _client_for(args: argparse.Namespace):  # noqa: ANN202 - OpenAICompatClient 
     return OpenAICompatClient(model=model, base_url=base_url), ""
 
 
+def _parse_languages(value: str | None) -> tuple[str, ...] | None:
+    """``--languages python,go`` 与 ``--languages "python go"`` 都接受。"""
+    if not value:
+        return None
+    items = {part.strip().lower() for part in re.split(r"[,\s]+", value) if part.strip()}
+    return tuple(sorted(items)) or None
+
+
 def init(args: argparse.Namespace) -> int:
-    """生成 ``codewiki.toml``（不带 ``--src`` 时吐模板，带则按真实仓库起草）。"""
-    target = Path(args.path) / CONFIG_FILENAME
+    """生成配置（不带 ``--src`` 时吐模板，带则按真实仓库起草）。"""
+    target = Path(args.out) if args.out else Path(args.path) / CONFIG_FILENAME
+    if args.out and args.path not in (".", ""):
+        print(f"note: 同时给了 --out 与 --path，按 --out 写到 {target}", file=sys.stderr)
     if target.exists() and not args.force:
         print(f"error: {target} 已存在，不覆盖（要重生成请加 --force 或先删除）", file=sys.stderr)
         return 2
@@ -155,7 +227,24 @@ def init(args: argparse.Namespace) -> int:
         print(f"error: --src 不是目录: {root}", file=sys.stderr)
         return 2
 
-    paths, deps, languages, missing = _scan(root, backend=args.backend, excludes=tuple(args.exclude or ()))
+    auto = [] if args.no_auto_exclude else _auto_excludes(root)
+    excludes = list(args.exclude or ())
+    for name, _reason in auto:
+        if name not in excludes:
+            excludes.append(name)
+    only_languages = _parse_languages(args.languages)
+
+    if auto:
+        print(f"按仓库结构自动排除 {len(auto)} 个顶层目录（--no-auto-exclude 可关闭）：")
+        for name, reason in auto:
+            print(f"  - {name:24s} {reason}")
+
+    paths, deps, languages, missing = _scan(
+        root,
+        backend=args.backend,
+        excludes=tuple(excludes),
+        only_languages=only_languages,
+    )
     if missing:
         detail = "、".join(f"{lang} {count} 个" for lang, count in sorted(missing.items()))
         print(
@@ -192,13 +281,19 @@ def init(args: argparse.Namespace) -> int:
         )
         return 2
 
-    aliases = detect_aliases(root)
+    aliases = {
+        key: value for key, value in detect_aliases(root).items() if value.split("/")[0] not in set(excludes)
+    }
+    if only_languages and not set(only_languages) & {"typescript", "javascript"}:
+        aliases = {}
+
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(
         render_config_toml(
             draft,
             project_name=root.name,
-            excludes=list(args.exclude or ()),
+            excludes=excludes,
+            auto_excludes=[name for name, _reason in auto],
             ts_aliases=aliases,
             languages=languages,
         ),

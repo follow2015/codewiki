@@ -61,7 +61,7 @@ wiki-output/
 
 | 命令 | 作用 | 需要 AI |
 |---|---|---|
-| `init` | 起草 `codewiki.toml`：目录骨架 + 依赖排序 + 环提示；`--ai` / `--deferred` 时由模型归并 | 可选 |
+| `init` | 起草配置（默认 `codewiki.toml`，`--out` 指定外挂路径）：自动排除非产品目录 + 目录骨架 + 依赖排序 + 环提示；`--ai` / `--deferred` 时由模型归并 | 可选 |
 | `analyze` | 纯静态分析 → 数据包 / 图 / Wiki / HTML | 否 |
 | `doctor` | 环境自检（Python / 后端 / Node / 离线资源 / AI） | 否 |
 | `export --zip` | 产物打包（原子化，跳过临时文件） | 否 |
@@ -143,6 +143,20 @@ codewiki init --src . --deferred .ai-queue
 deferred 还有待作答时既不写文件也不返回 0 —— 层边界只写好一半的配置，人不知道该改哪一层。
 缺 tree-sitter 时 TS/JS 会整片被跳过（看起来与"仓库本来没有前端"一模一样），所以会打一条
 warning 点名缺哪种语言、多少个文件。
+
+**非产品目录不用手数。** `init` 按结构事实自动排除：子目录自带 `.git`（部署副本 / 另一份
+克隆）、`tests` / `scripts` / `migrations` / `docs` / `deploy` / 备份 / 存档 / 运行时目录、
+带版本号的第三方包快照。实测一份真实仓库，手写的 31 条 `exclude` 换成自动 12 条 +
+`--languages python` 之后：683 个模块 / 18 层 / **未分层 0**，与手工精修版（670 个）只差
+一份没有 `.git` 的克隆。判错就从数组里删掉，配置本身是唯一准绳；整个关掉用
+`--no-auto-exclude`。**职责归并不猜** —— 目录名推不出业务含义，那是 `--ai` 的活。
+
+外挂式配置（配置不落在被分析仓库里，一个仓放多份）用 `--out`：
+
+```bash
+codewiki init --src ~/Desktop/ipip --out configs/ipip.toml --languages python
+codewiki analyze --src ~/Desktop/ipip --config configs/ipip.toml --out wiki-output/ipip
+```
 
 ### 问答（`agent`）：开局概览 + 引用核对
 

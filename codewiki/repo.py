@@ -101,6 +101,30 @@ def iter_source_files(
     return files
 
 
+def nested_repo_dirs(root: Path) -> list[str]:
+    """``root`` 直属子目录里**自带 ``.git``** 的那些，按名字排序。
+
+    只看事实，不猜用途：子目录里有 ``.git``（目录，或 submodule/worktree 的
+    ``gitdir:`` 文件）就说明它是**一份独立仓库** —— 部署副本、另一份克隆、submodule
+    都算。把它扫进来等于同一份代码数两遍：实测某个仓库因此凭空多出 1090 个模块，
+    还单独占掉一个"层"。
+
+    只取**顶层名**：``[analysis] exclude`` 是按目录名（任意路径段）匹配的
+    （见 :func:`is_excluded`），多段路径写进去永远匹配不上；只取顶层名，语义正好与
+    匹配规则对齐，也不会误伤 ``app/vendor`` 这种深层同名目录。
+    """
+    found: list[str] = []
+    for child in sorted(root.iterdir()):
+        if not child.is_dir() or child.is_symlink():
+            continue
+        try:
+            if (child / ".git").exists():
+                found.append(child.name)
+        except OSError:
+            continue
+    return found
+
+
 def repo_commit(root: Path) -> str | None:
     """尽力取 HEAD 提交号（取不到返回 None，不阻断）。"""
     try:
@@ -109,4 +133,12 @@ def repo_commit(root: Path) -> str | None:
         return None
 
 
-__all__ = ["SourceFile", "iter_source_files", "language_of", "repo_commit", "DEFAULT_EXCLUDES"]
+__all__ = [
+    "DEFAULT_EXCLUDES",
+    "SourceFile",
+    "is_excluded",
+    "iter_source_files",
+    "language_of",
+    "nested_repo_dirs",
+    "repo_commit",
+]
