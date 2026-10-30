@@ -28,12 +28,7 @@ def render_index(packet: DataPacket) -> str:
     lines = [f"# {packet.meta.title}", ""]
 
     if packet.meta.repo_commit:
-        lines.append(
-            t(
-                f"> 提交：{packet.meta.repo_commit} · 生成于 {packet.meta.generated_at}",
-                f"> commit: {packet.meta.repo_commit} · generated at {packet.meta.generated_at}",
-            )
-        )
+        lines.append(t("wiki.commit_line", commit=packet.meta.repo_commit, at=packet.meta.generated_at))
         lines.append("")
 
     modules = [n for n in packet.nodes if n.type == NodeType.MODULE and n.path]
@@ -41,29 +36,24 @@ def render_index(packet: DataPacket) -> str:
     layers = sorted(packet.layers, key=lambda layer: layer.order if layer.order is not None else 10_000)
 
     if layers:
-        lines.append(t("## 架构分层", "## Architecture layers"))
+        lines.append(t("wiki.layers"))
         lines.append("")
         for layer in layers:
             members = sorted(m.path for m in modules if m.layer_id == layer.id)
-            lines.append(
-                t(
-                    f"- **{layer.name}**（{len(members)} 个模块）",
-                    f"- **{layer.name}** ({len(members)} modules)",
-                )
-            )
+            lines.append(t("wiki.layer_line", name=layer.name, count=len(members)))
             for path in members:
                 lines.append(f"  - [{path}]({MODULES_SUBDIR}/{slug_map[path]}.md)")
         lines.append("")
 
         unlayered = sorted(m.path for m in modules if not m.layer_id or m.layer_id.endswith("_unlayered"))
         if unlayered:
-            lines.append(t("## 未分层模块", "## Unlayered modules"))
+            lines.append(t("wiki.unlayered_modules"))
             lines.append("")
             for path in unlayered:
                 lines.append(f"- [{path}]({MODULES_SUBDIR}/{slug_map[path]}.md)")
             lines.append("")
     else:
-        lines.append(t("## 模块清单（未配置分层）", "## Modules (no layers configured)"))
+        lines.append(t("wiki.modules_no_layers"))
         lines.append("")
         for path in sorted(m.path for m in modules):
             lines.append(f"- [{path}]({MODULES_SUBDIR}/{slug_map[path]}.md)")
@@ -71,25 +61,17 @@ def render_index(packet: DataPacket) -> str:
 
     errors = [d for d in packet.diagnostics if d.level == "error"]
     warnings = [d for d in packet.diagnostics if d.level == "warning"]
-    lines.append(t("## 诊断摘要", "## Diagnostics"))
+    lines.append(t("wiki.diagnostics"))
     lines.append("")
     lines.append(
-        t(
-            f"- error {len(errors)} / warning {len(warnings)} / 共 {len(packet.diagnostics)}",
-            f"- error {len(errors)} / warning {len(warnings)} / total {len(packet.diagnostics)}",
-        )
+        t("wiki.diag_counts", errors=len(errors), warnings=len(warnings), total=len(packet.diagnostics))
     )
     lines.append("")
     for item in errors[:20]:
         where = f"（{item.where}）" if item.where else ""
         lines.append(f"- **error** `{item.code}` {where}：{item.message}")
     lines.append("")
-    lines.append(
-        t(
-            "完整清单见 [diagnostics.md](diagnostics.md)。",
-            "See [diagnostics.md](diagnostics.md) for the full list.",
-        )
-    )
+    lines.append(t("wiki.diag_full_list"))
     lines.append("")
     return "\n".join(lines)
 
@@ -115,8 +97,8 @@ def render_module_page(
     lines = [f"# {module.path}", ""]
     layer_name = _layer_name(packet, module.layer_id)
     meta_bits = [
-        t(f"语言 `{module.language or '?'}`", f"language `{module.language or '?'}`"),
-        t(f"层 {layer_name}", f"layer {layer_name}"),
+        t("wiki.language_bit", lang=module.language or "?"),
+        t("wiki.layer_bit", name=layer_name),
     ]
     if module.hash:
         meta_bits.append(f"hash `{module.hash}`")
@@ -125,23 +107,20 @@ def render_module_page(
 
     notes = [a for a in packet.annotations if a.target == module_id]
     if notes:
-        lines.append(t("## 注解", "## Annotations"))
+        lines.append(t("wiki.annotations"))
         lines.append("")
         for note in notes:
             tag = (
-                t("人工", "human")
+                t("wiki.tag_human")
                 if note.source == "human"
-                else t(
-                    f"AI（reviewed={str(note.reviewed).lower()}）",
-                    f"AI (reviewed={str(note.reviewed).lower()})",
-                )
+                else t("wiki.tag_ai", flag=str(note.reviewed).lower())
             )
             label = f"【{note.label}】" if note.label else ""
-            lines.append(f"- {label}{note.note} —— *{tag}*")
+            lines.append(t("wiki.annotation_line", label=label, note=note.note, tag=tag))
         lines.append("")
 
     if diagram_text:
-        lines.append(t("## 上下文图", "## Context diagram"))
+        lines.append(t("wiki.context_diagram"))
         lines.append("")
         lines.append("```mermaid")
         lines.append(diagram_text.rstrip("\n"))
@@ -150,9 +129,9 @@ def render_module_page(
 
     symbols = idx.symbols_of(module_id)
     if symbols:
-        lines.append(t("## 符号", "## Symbols"))
+        lines.append(t("wiki.symbols"))
         lines.append("")
-        lines.append(t("| 名称 | 类型 | 行 | 签名 | 说明 |", "| Name | Kind | Line | Signature | Docs |"))
+        lines.append(t("wiki.symbol_header"))
         lines.append("| --- | --- | --- | --- | --- |")
         for symbol in symbols:
             signature = (symbol.signature or "").replace("|", "\\|")
@@ -166,16 +145,16 @@ def render_module_page(
     downstream = sorted(downstream_map.items())
     slug_map = _packet_slug_map(packet)
     if upstream or downstream:
-        lines.append(t("## 上下游", "## Neighbors"))
+        lines.append(t("wiki.neighbors"))
         lines.append("")
         if upstream:
-            lines.append(t("**上游**（谁用到我）", "**Upstream** (who uses me)"))
+            lines.append(t("wiki.upstream"))
             lines.append("")
             for other, relation in upstream:
-                lines.append(f"- {_link(nodes, other, slug_map)} （{relation}）")
+                lines.append(t("wiki.neighbor_line", link=_link(nodes, other, slug_map), relation=relation))
             lines.append("")
         if downstream:
-            lines.append(t("**下游**（我依赖谁）", "**Downstream** (what I depend on)"))
+            lines.append(t("wiki.downstream"))
             lines.append("")
             for other, relation in downstream:
                 lines.append(f"- {_link(nodes, other, slug_map)} （{relation}）")
@@ -183,7 +162,7 @@ def render_module_page(
 
     lines.append("---")
     lines.append("")
-    lines.append(t(f"[← 返回索引](../{INDEX_FILENAME})", f"[← Back to index](../{INDEX_FILENAME})"))
+    lines.append(t("wiki.back_to_index", index=INDEX_FILENAME))
     lines.append("")
     return "\n".join(lines)
 
@@ -211,7 +190,7 @@ def _link(nodes: dict, node_id: str, slug_map: dict[str, str] | None = None) -> 
         if owner and owner.path:
             return f"`{node.name}`（{owner.path}）"
     if node_id.startswith("ext::"):
-        return f"`{node_id[len('ext::') :]}`（外部）"
+        return f"`{node_id[len('ext::') :]}`{t('wiki.external')}"
     return f"`{node_id}`"
 
 

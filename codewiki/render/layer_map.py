@@ -46,7 +46,6 @@ _LAYER_SEMANTIC = {
 }
 
 _UNLAYERED_ID = UNLAYERED_LAYER_ID
-_UNLAYERED_NAME = "未分层"
 
 _UNSAFE_ANCHOR = re.compile(r"[\"'<>&\s#]")
 
@@ -70,7 +69,7 @@ def _layer_buckets(packet: DataPacket):
         remaining = [n for n in remaining if n.layer_id != layer.id]
         bands.append((layer.id, layer.name, here))
     if remaining:
-        bands.append((_UNLAYERED_ID, t(_UNLAYERED_NAME, "Unlayered"), remaining))
+        bands.append((_UNLAYERED_ID, t("common.unlayered"), remaining))
     return bands, names
 
 
@@ -98,7 +97,7 @@ def _esc(text: str) -> str:
 def _display_name(lid: str, names: dict[str, str]) -> str:
     """层 id → 展示名；未分层兜底桶显示「未分层」而不是原始 id。"""
     if lid == _UNLAYERED_ID:
-        return t(_UNLAYERED_NAME, "Unlayered")
+        return t("common.unlayered")
     return names.get(lid, lid)
 
 
@@ -124,7 +123,7 @@ def _band_svg(y: float, lid: str, name: str, members: list, width: float) -> str
 
     dirs: dict[str, int] = {}
     for n in modules:
-        directory = n.path.rsplit("/", 1)[0] if "/" in (n.path or "") else t("(根)", "(root)")
+        directory = n.path.rsplit("/", 1)[0] if "/" in (n.path or "") else t("layer_map.root")
         dirs[directory] = dirs.get(directory, 0) + 1
     top_dirs = sorted(dirs.items(), key=lambda kv: (-kv[1], kv[0]))[:4]
     dir_chips = " · ".join(f"{d} ×{c}" for d, c in top_dirs) if top_dirs else "—"
@@ -138,7 +137,7 @@ def _band_svg(y: float, lid: str, name: str, members: list, width: float) -> str
         f'<text x="22" y="{y + 30}" font-size="14.5" font-weight="650" '
         f'style="fill:var(--text)">{_esc(name)}</text>',
         f'<text x="{width - 18}" y="{y + 30}" font-size="11.5" text-anchor="end" '
-        f'style="fill:var(--muted)">{t(f"{len(modules)} 模块 · {symbols} 符号", f"{len(modules)} modules · {symbols} symbols")}</text>',
+        f'style="fill:var(--muted)">{t("layer_map.module_stats", modules=len(modules), symbols=symbols)}</text>',
         f'<text x="22" y="{y + 56}" font-size="10.5" style="fill:var(--faint)">{_esc(dir_chips)}</text>',
         "</a>",
     ]
@@ -207,11 +206,11 @@ def render_layer_map_svg(packet: DataPacket, *, max_flows: int = 10) -> str:
     )
     parts.append(
         f'<text x="{px + 18}" y="{34}" font-size="12" font-weight="650" '
-        f'style="fill:var(--muted)">{t(f"跨层引用 TOP {len(flows)}", f"Top cross-layer refs {len(flows)}")}</text>'
+        f'style="fill:var(--muted)">{t("layer_map.cross_layer_top", count=len(flows))}</text>'
     )
     if not flows:
         parts.append(
-            f'<text x="{px + 18}" y="{60}" font-size="11" style="fill:var(--faint)">{t("无跨层引用", "no cross-layer refs")}</text>'
+            f'<text x="{px + 18}" y="{60}" font-size="11" style="fill:var(--faint)">{t("layer_map.no_cross_layer")}</text>'
         )
     row_y = 60.0
     for (src_lid, dst_lid), count in flows:
@@ -230,7 +229,7 @@ def render_layer_map_svg(packet: DataPacket, *, max_flows: int = 10) -> str:
     if overflow > 0:
         parts.append(
             f'<text x="{px + 18}" y="{row_y}" font-size="10.5" '
-            f'style="fill:var(--faint)">… 还有 {overflow} 对</text>'
+            f'style="fill:var(--faint)">{t("layer_map.more_flows", count=overflow)}</text>'
         )
 
     parts.append("</svg>")

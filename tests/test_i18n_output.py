@@ -46,11 +46,11 @@ def test_normalize(raw, expected):
     assert normalize(raw) == expected
 
 
-def test_t_is_in_place_bilingual():
+def test_t_reads_the_catalog_for_the_current_language():
     set_lang("zh")
-    assert t("中文", "English") == "中文"
+    assert t("site.overview") == "架构总览"
     set_lang("en")
-    assert t("中文", "English") == "English"
+    assert t("site.overview") == "Architecture overview"
 
 
 def test_html_lang_follows_setting():

@@ -188,7 +188,7 @@ _PAGE_STYLES = """  :root {
   }
   h3 { font-size: .95rem; margin: 1.6rem 0 .6rem; }
 
-  /* ── 首页 hero ── */
+  /* ── hero ── */
   .hero { padding: 1.2rem 0 1.6rem; border-bottom: 1px solid var(--border); }
   .hero h1 { font-family: var(--sans); font-size: 1.65rem; font-weight: 700; margin: 0 0 .7rem; }
   .chips { display: flex; flex-wrap: wrap; gap: .45rem; margin: 0 0 .7rem; }
@@ -203,7 +203,7 @@ _PAGE_STYLES = """  :root {
     .chip.err { color: #f87171; border-color: #7f1d1d; background: #2a1215; }
   }
 
-  /* ── 工具栏（搜索）── */
+  /* ── toolbar (search) ── */
   .layer-map {
     margin: 1rem 0 .4rem; overflow-x: auto;
   }
@@ -216,7 +216,7 @@ _PAGE_STYLES = """  :root {
   }
   .toolbar input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 
-  /* ── 分层分组 + 模块卡片 ── */
+  /* ── layer groups + module cards ── */
   .layer-group { margin: 1.5rem 0 2rem; }
   .layer-head {
     display: flex; align-items: center; gap: .55rem;
@@ -241,7 +241,7 @@ _PAGE_STYLES = """  :root {
   }
   .mod-card code { background: none; border: none; padding: 0; }
 
-  /* ── 正文（模块页/诊断页）── */
+  /* ── body (module / diagnostics pages) ── */
   .md-body {
     background: var(--panel); border: 1px solid var(--border);
     border-radius: var(--radius); box-shadow: var(--shadow);
@@ -382,7 +382,7 @@ def render_index_html(packet: DataPacket) -> str:
     def _group_html(lid: str, members: list) -> str:
         name = layer_names.get(
             lid,
-            t("未分层", "Unlayered") if lid == UNLAYERED_LAYER_ID else lid.rsplit("::", 1)[-1],
+            t("common.unlayered") if lid == UNLAYERED_LAYER_ID else lid.rsplit("::", 1)[-1],
         )
         color = layer_color(name)
         cards = "\n".join(
@@ -403,9 +403,9 @@ def render_index_html(packet: DataPacket) -> str:
     errors = [d for d in packet.diagnostics if d.level == "error"]
     err_chip = f'<span class="chip err"><b>{len(errors)}</b> error</span>' if errors else ""
     chips = (
-        f'<span class="chip"><b>{len(modules)}</b> {t("模块", "modules")}</span>'
-        f'<span class="chip"><b>{len(packet.nodes)}</b> {t("节点", "nodes")}</span>'
-        f'<span class="chip"><b>{len(packet.edges)}</b> {t("边", "edges")}</span>{err_chip}'
+        f'<span class="chip"><b>{len(modules)}</b> {t("site.chip_modules")}</span>'
+        f'<span class="chip"><b>{len(packet.nodes)}</b> {t("site.chip_nodes")}</span>'
+        f'<span class="chip"><b>{len(packet.edges)}</b> {t("site.chip_edges")}</span>{err_chip}'
     )
     layers_meta = "".join(
         f'<span class="chip" style="--c:{layer_color(layer_names[lid])}">{len(groups[lid])} {escape_text(layer_names.get(lid, lid))}</span>'
@@ -428,14 +428,14 @@ def render_index_html(packet: DataPacket) -> str:
     <h1>{safe_title}</h1>
     <div class="chips">{chips}</div>
     <div class="chips">{layers_meta}</div>
-    <p class="links"><a href="data/codewiki.json">{t("标准数据包", "data packet")}</a> · <a href="diagnostics.html">{t("诊断清单", "diagnostics")}</a></p>
+    <p class="links"><a href="data/codewiki.json">{t("site.data_packet")}</a> · <a href="diagnostics.html">{t("site.diagnostics")}</a></p>
   </header>
-  <h2>{t("架构总览", "Architecture overview")}</h2>
+  <h2>{t("site.overview")}</h2>
   <div class="layer-map">
 {layer_map_svg}
   </div>
   <div class="toolbar">
-    <input id="module-search" type="search" placeholder="{t("筛选模块（支持路径片段，如 api / service）…", "Filter modules (path fragments such as api / service)…")}" />
+    <input id="module-search" type="search" placeholder="{t("site.search_placeholder")}" />
   </div>
 {sections}
   </div>

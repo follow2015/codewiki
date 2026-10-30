@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 from codewiki.graph.analysis import Cycle
+from codewiki.render.i18n import t
 from codewiki.render.mermaid_macro import escape_label, node_id
 
 
@@ -34,7 +35,7 @@ def render_cycle_diagram(cycle: Cycle, *, index: int = 1) -> str:
     candidate = _break_candidate(cycle)
     if candidate:
         name = candidate.removeprefix("mod::").removeprefix("layer::")
-        lines.append(f"  %% 断环建议：优先下沉 `{name}`（环内被依赖最多），使其余依赖变为上层→下层")
+        lines.append("  " + t("diagrams.cycle_hint", name=name))
     return "\n".join(lines) + "\n"
 
 

@@ -18,9 +18,9 @@ from codewiki.schemas import Diagnostic
 
 def write_diagnostics_md(out_dir: Path, diagnostics: list[Diagnostic]) -> None:
     """把诊断写成人类可读的最小清单（无诊断时也落一行说明，不写空文件）。"""
-    lines = [t("# codewiki 诊断", "# codewiki diagnostics"), ""]
+    lines = [t("diagnostics.title"), ""]
     if not diagnostics:
-        lines.append(t("无诊断输出。", "No diagnostics."))
+        lines.append(t("diagnostics.empty"))
     for item in diagnostics:
         where = f"（{item.where}）" if item.where else ""
         lines.append(f"- **{item.level}** `{item.code}` {where}：{item.message}")

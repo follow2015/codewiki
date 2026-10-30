@@ -168,6 +168,7 @@ def test_unlayered_modules_appear_in_system_context():
     """
     from codewiki.layering import UNLAYERED_LAYER_ID
     from codewiki.models import Node, NodeType
+    from codewiki.render.i18n import t
     from codewiki.render.mermaid_macro import UNLAYERED_LABEL, node_id
     from codewiki.schemas import LayerNode
 
@@ -186,7 +187,7 @@ def test_unlayered_modules_appear_in_system_context():
 
     text = render_system_context(packet)
 
-    assert UNLAYERED_LABEL in text, "要有未分层兜底组"
+    assert t(UNLAYERED_LABEL) in text, "要有未分层兜底组"
     assert f'{node_id(loose)}["loose.py"]' in text, "未分层模块必须出现在图上"
 
 

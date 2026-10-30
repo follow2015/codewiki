@@ -8,9 +8,13 @@
 
 [project]
 name = "我的项目"
-# 产物语言：影响界面固定文案（导航、章节标题、表头、SVG 标注）与 <html lang>。
-# 层名、模块路径、代码内容保持原样。支持 zh / en（en-US、en_US 也认），
-# 认不出的值退回 zh —— 这个字段不影响分析结果，没必要为它中断整条流水线。
+# 产物语言：影响界面固定文案（导航、章节标题、表头、SVG 标注、图表注释）与 <html lang>。
+# 支持 zh / en（en-US、en_US 也认），认不出的值退回 zh —— 这个字段不影响分析结果，
+# 没必要为它中断整条流水线。
+# 文案表在 codewiki/render/locales/<lang>.py。加一门语言 = 新建一个表 + 在
+# locales/__init__.py 的 CATALOGS 登记，**不用改任何 t() 调用点**。
+# 不翻的部分：诊断消息（Diagnostic.message —— 开发者接口，code 才是稳定契约）、
+# 层名 / 模块路径 / docstring / 注解内容（这些是被分析仓库的数据，不是界面文案）。
 lang = "zh"
 
 [languages]
