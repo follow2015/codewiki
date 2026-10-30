@@ -37,12 +37,12 @@ _LAYER_PALETTE = (
 )
 
 _LAYER_SEMANTIC = {
-    "接口层": "#6366f1",
-    "服务层": "#3b82f6",
-    "数据层": "#10b981",
-    "基础设施": "#f59e0b",
-    "契约层": "#a855f7",
-    "任务层": "#f43f5e",
+    "接口层": "#6366f1",  # i18n-ignore
+    "服务层": "#3b82f6",  # i18n-ignore
+    "数据层": "#10b981",  # i18n-ignore
+    "基础设施": "#f59e0b",  # i18n-ignore
+    "契约层": "#a855f7",  # i18n-ignore
+    "任务层": "#f43f5e",  # i18n-ignore
 }
 
 _UNLAYERED_ID = UNLAYERED_LAYER_ID

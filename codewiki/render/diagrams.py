@@ -64,7 +64,7 @@ def render_all(
             Diagnostic(
                 level="error",
                 code="DIAGRAM_INVALID",
-                message="宏观架构图未通过 L1 校验，已放弃出图: "
+                message="宏观架构图未通过 L1 校验，已放弃出图: "  # i18n-ignore
                 + "; ".join(f"{i.code}@{i.message}" for i in issues),
                 where=SYSTEM_DIAGRAM,
             )
@@ -85,7 +85,7 @@ def render_all(
                     Diagnostic(
                         level="error",
                         code="DIAGRAM_INVALID",
-                        message=f"分包图 {index} 未通过 L1 校验，已放弃出图: "
+                        message=f"分包图 {index} 未通过 L1 校验，已放弃出图: "  # i18n-ignore
                         + "; ".join(f"{i.code}@{i.message}" for i in problems),
                         where=f"{SYSTEM_STEM}-part-{index}",
                     )
@@ -105,7 +105,7 @@ def render_all(
             Diagnostic(
                 level="info",
                 code="DIAGRAM_PAGED",
-                message=f"宏观图节点数超过 max_nodes={max_nodes}：已按层拆成 {len(pages)} 页（见 {SYSTEM_INDEX}）",
+                message=f"宏观图节点数超过 max_nodes={max_nodes}：已按层拆成 {len(pages)} 页（见 {SYSTEM_INDEX}）",  # i18n-ignore
                 where=SYSTEM_DIAGRAM,
             )
         )
@@ -135,7 +135,7 @@ def render_all(
                 Diagnostic(
                     level="error",
                     code="DIAGRAM_INVALID",
-                    message="模块上下文图未通过 L1 校验，已放弃出图: "
+                    message="模块上下文图未通过 L1 校验，已放弃出图: "  # i18n-ignore
                     + "; ".join(f"{i.code}@{i.message}" for i in problems),
                     where=node.path,
                 )

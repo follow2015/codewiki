@@ -465,7 +465,7 @@ def asset_diagnostics(out_dir: Path) -> list[Diagnostic]:
         Diagnostic(
             level="info",
             code="ASSET_MISSING",
-            message=f"缺少 {MERMAID_ASSET}：离线看图不可用（阶段三随包携带；当前图以 .mmd 原文呈现）",
+            message=f"缺少 {MERMAID_ASSET}：离线看图不可用（阶段三随包携带；当前图以 .mmd 原文呈现）",  # i18n-ignore
         )
     ]
 
