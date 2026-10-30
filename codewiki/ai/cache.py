@@ -22,7 +22,7 @@ from pathlib import Path
 
 CACHE_DIRNAME = ".codewiki/ai-cache"
 
-PROMPT_VERSION = "annotate-v3"
+PROMPT_VERSION = "annotate-v4"
 
 
 def digest_of(text: str) -> str:

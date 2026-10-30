@@ -18,12 +18,17 @@ from __future__ import annotations
 import hashlib
 from dataclasses import dataclass
 
+from codewiki.ai.tools import inline_untrusted
+
 MAX_NEIGHBORS_PER_DIRECTION = 12
+
+MAX_PATH_CHARS = 200
 
 
 def _one_line(text: str) -> str:
-    """压成单行：路径里若含换行（POSIX 允许），它能伪造出一行"邻居"。"""
-    return " ".join(str(text).split())
+    """净化成单行：路径里若含换行（POSIX 允许），它能伪造出一行"邻居"；
+    若含数据分隔符或"忽略以上指令"，它就是提示词注入的现成载体（文件名由仓库作者决定）。"""
+    return inline_untrusted(text, limit=MAX_PATH_CHARS)
 
 
 @dataclass(frozen=True)

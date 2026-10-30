@@ -61,15 +61,45 @@ class ToolError(Exception):
     """工具调用失败（越界、不存在、不可读等）。"""
 
 
+MAX_ORIGIN_CHARS = 200
+_ANGLE_RUN = re.compile(r"<{3,}|>{3,}")
+
+
+def neutralize_delimiters(text: str) -> str:
+    """中性化正文里的数据分隔符（任何大小写 / 空白变体）。"""
+    return _DELIM_VARIANT.sub(_DELIM_NEUTERED, text)
+
+
+def inline_untrusted(text: object, *, limit: int = 300) -> str:
+    """把**单行**不可信字段（文件名 / 层名 / 注解 / 项目名）净化后拼进提示词。
+
+    这类字段来自被分析仓库（路径、``codewiki.toml``），而且往往被放在分隔符**之外**
+    的"可信区"里 —— 文件名可以含换行、``<<<END_CODEWIKI_UNTRUSTED_DATA>>>`` 和
+    "忽略以上指令"。处理三件事：压成单行（不能凭换行伪造出新的一行）、中性化分隔符
+    变体并抹掉连续 ``<<<`` / ``>>>``、限长（截断要可见）。
+    """
+    one = " ".join(str(text).split())
+    one = _ANGLE_RUN.sub("…", neutralize_delimiters(one))
+    return one if len(one) <= limit else one[:limit] + "…"
+
+
 def wrap_untrusted(text: str, *, origin: str = "") -> str:
     """把不可信内容包进固定分隔符，供 Prompt 引用。
 
     内容里若出现分隔符本身（任何大小写/空白变体），先**中性化**再包裹 ——
     否则攻击者在文件里写一行 END 分隔符就能提前结束数据块，把后续内容
     伪装成可信指令（外部评审实测面）。
+
+    ``origin`` 常常就是一条路径（``annotate`` 直接传 ``path``），它落在方括号头里、
+    在分隔符**之外**，所以同样要净化：压平换行 + 中性化分隔符变体 + 限长；
+    另外转义 ``]`` —— 它是唯一能提前关闭这个方括号头的字符（常见于
+    Next.js 的 ``pages/[slug].tsx``），``[`` 在括号内无害。
     """
-    head = f"[来源: {origin}]\n" if origin else ""
-    safe = _DELIM_VARIANT.sub(_DELIM_NEUTERED, text)
+    head = ""
+    if origin:
+        shown = inline_untrusted(origin, limit=MAX_ORIGIN_CHARS).replace("]", "\\]")
+        head = f"[来源: {shown}]\n"
+    safe = neutralize_delimiters(text)
     return f"{head}{DELIM_BEGIN}\n{safe}\n{DELIM_END}"
 
 
@@ -534,9 +564,12 @@ __all__ = [
     "DELIM_END",
     "GraphHit",
     "MAX_GIT_LOG_LIMIT",
+    "MAX_ORIGIN_CHARS",
     "ToolError",
     "git_log",
     "git_show",
+    "inline_untrusted",
+    "neutralize_delimiters",
     "query_graph",
     "read_file",
     "resolve_in_repo",
