@@ -220,7 +220,11 @@ def test_strip_comments_does_not_leave_double_blank_lines():
     import importlib.util
     from pathlib import Path
 
+    import pytest
+
     script = Path(__file__).resolve().parent.parent / "scripts" / "strip-comments.py"
+    if not script.exists():
+        pytest.skip("交付仓不含内部工具 scripts/strip-comments.py")
     spec = importlib.util.spec_from_file_location("strip_comments", script)
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None

@@ -28,7 +28,7 @@ SAMPLE = Path("tests/samples/scip/minimal.scip")
 @pytest.fixture
 def sample_bytes() -> bytes:
     if not SAMPLE.is_file():
-        pytest.skip("缺少 SCIP 样本（先跑 scripts/make_scip_sample.py）")
+        pytest.skip("缺少 SCIP 样本 tests/samples/scip/minimal.scip")
     return SAMPLE.read_bytes()
 
 
