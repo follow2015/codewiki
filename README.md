@@ -32,9 +32,9 @@ pip install -e .
 # 零配置直跑
 codewiki analyze --src /path/to/your/repo --out wiki-output
 
-# 或先拷示例配置再定制分层
-cp codewiki.toml.example codewiki.toml
-codewiki analyze --src . --config codewiki.toml --out wiki-output
+# 或先起草一份配置（扫描真实目录 + 按依赖排层序，不用手写）
+codewiki init --src .
+codewiki analyze --src . --out wiki-output
 
 # 环境自检
 codewiki doctor
@@ -61,6 +61,7 @@ wiki-output/
 
 | 命令 | 作用 | 需要 AI |
 |---|---|---|
+| `init` | 起草 `codewiki.toml`：目录骨架 + 依赖排序 + 环提示；`--ai` / `--deferred` 时由模型归并 | 可选 |
 | `analyze` | 纯静态分析 → 数据包 / 图 / Wiki / HTML | 否 |
 | `doctor` | 环境自检（Python / 后端 / Node / 离线资源 / AI） | 否 |
 | `export --zip` | 产物打包（原子化，跳过临时文件） | 否 |
@@ -115,6 +116,33 @@ codewiki ai-annotate --input wiki-output/data/codewiki.json --config codewiki.to
 只认命令行与环境变量**（写在文件里会被忽略并提示原因）——否则 hostile 仓库可以把
 API Key 发往任意地址，或让 AI 建议直接合进主配置。自己拥有的仓库要保留文件写法时，
 加 `--trust-config`（或 `CODEWIKI_TRUST_CONFIG=1`）显式授权。 <!-- guarantee: ai-config-trust -->
+
+### agent 全自动起草配置（`init` 三态）
+
+agent 调 `codewiki` 时不需要人先想层怎么分：`codewiki init --src .` 按环境自动选路。
+
+| 环境 | 行为 |
+|---|---|
+| 配了 `OPENAI_MODEL` / `--model` | 模型按职责归并；结果**逐条校验**，编造的目录整层丢弃 |
+| 什么都没配 | 纯静态：目录骨架 + 按依赖排出的层序 + 点名互相依赖/成环的目录对 |
+| `--deferred <dir>` | agent 自己充当模型，零凭据零网络（与 `ai-annotate` 同机制） |
+
+deferred 三步 —— **退出码 3 表示"请求已导出、还没作答"，不是失败**：
+
+```bash
+# ① 只导出待问内容
+codewiki init --src . --deferred .ai-queue
+
+# ② 读 .ai-queue/requests/*.json（文件自带作答协议），答案写到 .ai-queue/answers/<同名文件>
+
+# ③ 重跑同一条命令 → 落 codewiki.toml（退出码 0）
+```
+
+起草结果自带 `[languages]`（按实际扫到的语言）、`[analysis] exclude`（`--exclude` 追加项）
+与从 `tsconfig` 推断的 `ts_aliases`，可以直接 `analyze --config` 使用。**半成品不落盘**：
+deferred 还有待作答时既不写文件也不返回 0 —— 层边界只写好一半的配置，人不知道该改哪一层。
+缺 tree-sitter 时 TS/JS 会整片被跳过（看起来与"仓库本来没有前端"一模一样），所以会打一条
+warning 点名缺哪种语言、多少个文件。
 
 ### 问答（`agent`）：开局概览 + 引用核对
 
