@@ -22,6 +22,7 @@ import re
 from codewiki.layering import UNLAYERED_LAYER_ID
 from codewiki.models import NodeType
 from codewiki.render.escape import escape_attr
+from codewiki.render.i18n import t
 from codewiki.schemas import DataPacket
 
 _LAYER_PALETTE = (
@@ -69,7 +70,7 @@ def _layer_buckets(packet: DataPacket):
         remaining = [n for n in remaining if n.layer_id != layer.id]
         bands.append((layer.id, layer.name, here))
     if remaining:
-        bands.append((_UNLAYERED_ID, _UNLAYERED_NAME, remaining))
+        bands.append((_UNLAYERED_ID, t(_UNLAYERED_NAME, "Unlayered"), remaining))
     return bands, names
 
 
@@ -97,7 +98,7 @@ def _esc(text: str) -> str:
 def _display_name(lid: str, names: dict[str, str]) -> str:
     """层 id → 展示名；未分层兜底桶显示「未分层」而不是原始 id。"""
     if lid == _UNLAYERED_ID:
-        return _UNLAYERED_NAME
+        return t(_UNLAYERED_NAME, "Unlayered")
     return names.get(lid, lid)
 
 
@@ -123,7 +124,7 @@ def _band_svg(y: float, lid: str, name: str, members: list, width: float) -> str
 
     dirs: dict[str, int] = {}
     for n in modules:
-        directory = n.path.rsplit("/", 1)[0] if "/" in (n.path or "") else "(根)"
+        directory = n.path.rsplit("/", 1)[0] if "/" in (n.path or "") else t("(根)", "(root)")
         dirs[directory] = dirs.get(directory, 0) + 1
     top_dirs = sorted(dirs.items(), key=lambda kv: (-kv[1], kv[0]))[:4]
     dir_chips = " · ".join(f"{d} ×{c}" for d, c in top_dirs) if top_dirs else "—"
@@ -137,7 +138,7 @@ def _band_svg(y: float, lid: str, name: str, members: list, width: float) -> str
         f'<text x="22" y="{y + 30}" font-size="14.5" font-weight="650" '
         f'style="fill:var(--text)">{_esc(name)}</text>',
         f'<text x="{width - 18}" y="{y + 30}" font-size="11.5" text-anchor="end" '
-        f'style="fill:var(--muted)">{len(modules)} 模块 · {symbols} 符号</text>',
+        f'style="fill:var(--muted)">{t(f"{len(modules)} 模块 · {symbols} 符号", f"{len(modules)} modules · {symbols} symbols")}</text>',
         f'<text x="22" y="{y + 56}" font-size="10.5" style="fill:var(--faint)">{_esc(dir_chips)}</text>',
         "</a>",
     ]
@@ -206,11 +207,11 @@ def render_layer_map_svg(packet: DataPacket, *, max_flows: int = 10) -> str:
     )
     parts.append(
         f'<text x="{px + 18}" y="{34}" font-size="12" font-weight="650" '
-        f'style="fill:var(--muted)">跨层引用 TOP {len(flows)}</text>'
+        f'style="fill:var(--muted)">{t(f"跨层引用 TOP {len(flows)}", f"Top cross-layer refs {len(flows)}")}</text>'
     )
     if not flows:
         parts.append(
-            f'<text x="{px + 18}" y="{60}" font-size="11" style="fill:var(--faint)">无跨层引用</text>'
+            f'<text x="{px + 18}" y="{60}" font-size="11" style="fill:var(--faint)">{t("无跨层引用", "no cross-layer refs")}</text>'
         )
     row_y = 60.0
     for (src_lid, dst_lid), count in flows:

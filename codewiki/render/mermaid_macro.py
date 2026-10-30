@@ -20,6 +20,7 @@ import hashlib
 
 from codewiki.layering import UNLAYERED_LAYER_ID
 from codewiki.models import EdgeType, NodeType
+from codewiki.render.i18n import t
 from codewiki.schemas import DataPacket
 
 DYNAMIC_EDGE = "-.->"
@@ -89,7 +90,7 @@ def render_system_context(
 
     unlayered = [m for m in modules if not m.layer_id or m.layer_id == UNLAYERED_LAYER_ID]
     if unlayered:
-        lines.append(f'  subgraph {node_id(UNLAYERED_LAYER_ID)}["{UNLAYERED_LABEL}"]')
+        lines.append(f'  subgraph {node_id(UNLAYERED_LAYER_ID)}["{t(UNLAYERED_LABEL, "Unlayered")}"]')
         for module in _sorted_by_weight(packet, unlayered):
             label = escape_label(module.path or module.id)
             lines.append(f'    {node_id(module.id)}["{_annotation_label(packet, module.id, label)}"]')

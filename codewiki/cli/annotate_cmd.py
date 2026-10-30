@@ -24,9 +24,9 @@ from codewiki.config import CONFIG_FILENAME, ConfigError
 from codewiki.packetio import PacketError, load_packet
 from codewiki.render.diagnostics_md import write_diagnostics_md
 from codewiki.schemas import Diagnostic
-from codewiki.trust import load_trusted_config
+from codewiki.trust import ai_denied, load_trusted_config
 
-from .context import trusted
+from .context import force_ai, trusted
 
 WRITE_BACK_POLICIES = frozenset({"review-file", "dry-run", "confirm", "auto"})
 
@@ -55,6 +55,10 @@ def annotate(args: argparse.Namespace) -> int:
         cfg = load_trusted_config(config_path, trusted=trusted(args))
     except ConfigError as exc:
         print(f"error: {exc}", file=sys.stderr)
+        return 2
+    denied = ai_denied(cfg, force=force_ai(args))
+    if denied:
+        print(denied, file=sys.stderr)
         return 2
     model = resolve_model(cli_value=args.model, config_value=cfg.ai.model)
     deferred_root = Path(args.deferred).resolve() if getattr(args, "deferred", None) else None

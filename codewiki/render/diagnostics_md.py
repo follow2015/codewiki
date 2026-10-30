@@ -12,14 +12,15 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from codewiki.render.i18n import t
 from codewiki.schemas import Diagnostic
 
 
 def write_diagnostics_md(out_dir: Path, diagnostics: list[Diagnostic]) -> None:
     """把诊断写成人类可读的最小清单（无诊断时也落一行说明，不写空文件）。"""
-    lines = ["# codewiki 诊断", ""]
+    lines = [t("# codewiki 诊断", "# codewiki diagnostics"), ""]
     if not diagnostics:
-        lines.append("无诊断输出。")
+        lines.append(t("无诊断输出。", "No diagnostics."))
     for item in diagnostics:
         where = f"（{item.where}）" if item.where else ""
         lines.append(f"- **{item.level}** `{item.code}` {where}：{item.message}")

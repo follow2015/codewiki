@@ -81,3 +81,17 @@ def fake_client_factory():
         return FakeClient(replies, **kwargs)
 
     return _make
+
+
+@pytest.fixture(autouse=True)
+def _reset_output_lang():
+    """产物语言是进程级上下文变量：上一个用例设成 en 会污染下一个。
+
+    autouse 而不是让每个用例自己管：漏一个就会出现"单独跑绿、全量跑红"的
+    顺序依赖，而那种红最难查 —— 断言和代码看着都对。
+    """
+    from codewiki.render.i18n import set_lang
+
+    set_lang("zh")
+    yield
+    set_lang("zh")

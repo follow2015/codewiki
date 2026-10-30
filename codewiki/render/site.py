@@ -20,6 +20,7 @@ from codewiki.layering import UNLAYERED_LAYER_ID
 from codewiki.models import NodeType
 from codewiki.render.diagrams import build_slug_map
 from codewiki.render.escape import escape_attr, escape_text
+from codewiki.render.i18n import html_lang, t
 from codewiki.render.layer_map import layer_anchor, layer_color, render_layer_map_svg
 from codewiki.render.wiki import MODULES_SUBDIR
 from codewiki.schemas import DataPacket, Diagnostic
@@ -292,7 +293,7 @@ def render_module_html(md: str, *, title: str, asset_prefix: str = "") -> str:
     safe_title = escape_text(title)
     return (
         "<!doctype html>\n"
-        '<html lang="zh-CN">\n<head>\n<meta charset="utf-8" />\n'
+        f'<html lang="{html_lang()}">\n<head>\n<meta charset="utf-8" />\n'
         '<meta name="viewport" content="width=device-width, initial-scale=1" />\n'
         f"<title>{safe_title} · codewiki</title>\n<style>\n{_PAGE_STYLES}</style>\n"
         "</head>\n<body>\n"
@@ -379,7 +380,10 @@ def render_index_html(packet: DataPacket) -> str:
         groups.setdefault(lid, []).append(n)
 
     def _group_html(lid: str, members: list) -> str:
-        name = layer_names.get(lid, "未分层" if lid == UNLAYERED_LAYER_ID else lid.rsplit("::", 1)[-1])
+        name = layer_names.get(
+            lid,
+            t("未分层", "Unlayered") if lid == UNLAYERED_LAYER_ID else lid.rsplit("::", 1)[-1],
+        )
         color = layer_color(name)
         cards = "\n".join(
             f'    <a class="mod-card" href="{MODULES_SUBDIR}/{escape_attr(slug_map[m.path])}.html">'
@@ -399,9 +403,9 @@ def render_index_html(packet: DataPacket) -> str:
     errors = [d for d in packet.diagnostics if d.level == "error"]
     err_chip = f'<span class="chip err"><b>{len(errors)}</b> error</span>' if errors else ""
     chips = (
-        f'<span class="chip"><b>{len(modules)}</b> 模块</span>'
-        f'<span class="chip"><b>{len(packet.nodes)}</b> 节点</span>'
-        f'<span class="chip"><b>{len(packet.edges)}</b> 边</span>{err_chip}'
+        f'<span class="chip"><b>{len(modules)}</b> {t("模块", "modules")}</span>'
+        f'<span class="chip"><b>{len(packet.nodes)}</b> {t("节点", "nodes")}</span>'
+        f'<span class="chip"><b>{len(packet.edges)}</b> {t("边", "edges")}</span>{err_chip}'
     )
     layers_meta = "".join(
         f'<span class="chip" style="--c:{layer_color(layer_names[lid])}">{len(groups[lid])} {escape_text(layer_names.get(lid, lid))}</span>'
@@ -410,7 +414,7 @@ def render_index_html(packet: DataPacket) -> str:
     )
 
     return f"""<!doctype html>
-<html lang="zh-CN">
+<html lang="{html_lang()}">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -424,14 +428,14 @@ def render_index_html(packet: DataPacket) -> str:
     <h1>{safe_title}</h1>
     <div class="chips">{chips}</div>
     <div class="chips">{layers_meta}</div>
-    <p class="links"><a href="data/codewiki.json">标准数据包</a> · <a href="diagnostics.html">诊断清单</a></p>
+    <p class="links"><a href="data/codewiki.json">{t("标准数据包", "data packet")}</a> · <a href="diagnostics.html">{t("诊断清单", "diagnostics")}</a></p>
   </header>
-  <h2>架构总览</h2>
+  <h2>{t("架构总览", "Architecture overview")}</h2>
   <div class="layer-map">
 {layer_map_svg}
   </div>
   <div class="toolbar">
-    <input id="module-search" type="search" placeholder="筛选模块（支持路径片段，如 api / service）…" />
+    <input id="module-search" type="search" placeholder="{t("筛选模块（支持路径片段，如 api / service）…", "Filter modules (path fragments such as api / service)…")}" />
   </div>
 {sections}
   </div>

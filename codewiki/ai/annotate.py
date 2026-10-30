@@ -446,6 +446,9 @@ def annotate_modules(
         return result
 
     layers, annotations = build_context(packet, cfg, src_root=src_root)
+    topology_hash = (
+        digest_of("\n".join([cfg.title, *layers, *annotations])) if cfg.ai.cache_include_topology else None
+    )
     cache = ResultCache(cache_dir) if cache_dir else None
     budget = TokenBudget(budget_tokens)
     json_kwargs: dict = (
@@ -486,6 +489,7 @@ def annotate_modules(
             model=client.model,
             prompt_version=PROMPT_VERSION,
             neighbors_hash=neighbors.digest,
+            topology_hash=topology_hash,
         )
         raw = ""
         from_cache = False

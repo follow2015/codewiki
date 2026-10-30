@@ -45,7 +45,7 @@ def test_missing_config_falls_back_to_defaults(tmp_path):
     assert isinstance(cfg, CodewikiConfig)
     assert cfg.analysis.min_confidence == 0.5
     assert cfg.layer_of("anything.py") == "layer::_unlayered"
-    assert cfg.ai.enabled is False
+    assert cfg.ai.enabled is None
 
 
 def test_syntax_error_reports_line_number(tmp_path):

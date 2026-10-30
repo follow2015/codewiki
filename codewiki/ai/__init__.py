@@ -14,6 +14,7 @@
 * :mod:`codewiki.ai.annotate` —— ``ai-annotate``；
 * :mod:`codewiki.ai.merge` —— ``merge-annotations``；
 * :mod:`codewiki.ai.diagram` —— AI 时序图 + 坏图零落盘回退；
+* :mod:`codewiki.ai.sequences` —— 从数据包提取模块级调用链（时序图的输入）；
 * :mod:`codewiki.ai.audit` —— JSONL 审计（脱敏）。
 """
 

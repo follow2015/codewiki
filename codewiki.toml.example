@@ -8,6 +8,9 @@
 
 [project]
 name = "我的项目"
+# 产物语言：影响界面固定文案（导航、章节标题、表头、SVG 标注）与 <html lang>。
+# 层名、模块路径、代码内容保持原样。支持 zh / en（en-US、en_US 也认），
+# 认不出的值退回 zh —— 这个字段不影响分析结果，没必要为它中断整条流水线。
 lang = "zh"
 
 [languages]
@@ -56,8 +59,16 @@ label = "订单核心"
 note = "下单主链路；并发限制见 run_order 的 Redis 锁。"
 
 [ai]
-# 整段缺失等同 enabled = false（纯静态模式，analyze 全功能可用）
-enabled = false
+# AI 增强总开关，三态：
+#   缺省（不写这一行）—— 不干预：AI 命令是否执行由 --model / OPENAI_MODEL 决定；
+#   enabled = false    —— 项目方声明"不要 AI 分析"：ai-annotate / agent 直接退出 2，
+#                         操作者确实要跑时加 --force-ai（或 CODEWIKI_FORCE_AI=1）。
+#                         merge-annotations 不受管：它不调模型，是人工环节；
+#   enabled = true     —— 允许，但**不强制**：没有模型照样报错，端点与模型仍只认
+#                         操作者（见下）。这里的 true 之所以不能"开启 AI"，是因为
+#                         该文件来自被分析仓库，让它能开等于把 API Key 的去向交给它。
+# analyze（纯静态）不受本字段影响：整段缺失也全功能可用。
+# enabled = true
 # ── 下面三项「只认操作者」──────────────────────────────────────────────────
 # 本文件通常就躺在**被分析仓库**里，作者可控。若允许它决定端点和写入策略，
 # hostile 仓库就能把 OPENAI_API_KEY 发往任意地址，或让 AI 建议直接合进主配置。
@@ -75,7 +86,13 @@ max_retries = 2
 timeout_s = 60
 # 标注取前 N 个热点模块
 top_n = 30
-# 拓扑感知缓存键（可选优化项，默认关闭）
-cache_include_topology = false
-# L2 真实渲染校验（需 Node 24 LTS + mermaid-cli ≥12）
+# 拓扑感知缓存键（默认开）。标注 prompt 里带着项目名 / 层名 / 人工注解，三者都来自
+# 本文件：改了分层或补了注解，同一份源码该得到的答案就不同了。不把它们的指纹打进
+# 缓存键，命中就等于拿旧语境作答（"我改了分层，AI 的注解还按老层说"）。
+# 注解持续增长的仓库可以关掉它换取命中率，代价是可能复用旧语境的答案。
+cache_include_topology = true
+# L2 真实渲染校验（默认关）：`ai-diagram` 出图后除了 L1 特征校验，再用
+# mermaid-cli 真渲染一次（需 Node 24 LTS + mermaid-cli ≥12）。默认关是因为多数
+# 环境没有 mmdc —— 打开但环境不具备时会降级为只跑 L1 并留诊断，不会误判好图。
+# 临时开启用 `ai-diagram --l2-validate`。
 l2_validate = false

@@ -72,6 +72,7 @@ wiki-output/
 | `merge-layers` | 合并建议分层（不覆盖人工层） | 否 |
 | `import-graph` | 导入外部图谱（graphify）→ 统一数据包 | 否 |
 | `ai-annotate` | AI 架构标注 → 建议文件（**不改主配置**）；`--deferred` 时由 agent 作答 | 是 |
+| `ai-diagram` | AI 时序图：从静态调用链出图（坏图零落盘）；`--l2-validate` 走真实渲染校验 | 是 |
 | `merge-annotations` | 合并 AI 建议（人工注解受保护） | 否 |
 | `agent` | 交互问答：模型调只读工具取证后作答 | 是 |
 
@@ -90,6 +91,17 @@ codewiki ai-annotate --input wiki-output/data/codewiki.json --config codewiki.to
 
 # ③ 回开发机：diff 审阅后合并，重新 analyze 生效
 codewiki merge-annotations /tmp/ai/suggestions/annotations.suggest.toml
+```
+
+时序图单独一条命令（`analyze` 保持纯静态，不联网）：
+
+```bash
+# 从静态 CALLS 边挑调用链 → 出 Mermaid 时序图；校验不过的图不落盘
+codewiki ai-diagram --input wiki-output/data/codewiki.json --config codewiki.toml \
+  --out wiki-output --top-n 3 --depth 5
+
+# 想要真实渲染校验（需 Node + mermaid-cli）：配置 [ai] l2_validate = true
+# 或临时加 --l2-validate；环境不具备时降级为只跑 L1 并留诊断
 ```
 
 ### 无凭据、不出网：让 agent 充当模型（`--deferred`）

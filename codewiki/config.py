@@ -96,7 +96,7 @@ class AiSection(BaseModel):
 
     model_config = _EXTRA_FORBID
 
-    enabled: bool = False
+    enabled: bool | None = None
     base_url: str | None = None
     model: str | None = None
     budget_tokens: int | None = None
@@ -104,7 +104,7 @@ class AiSection(BaseModel):
     timeout_s: float = Field(default=60.0, gt=0)
     top_n: int = Field(default=30, gt=0)
     write_back: str = "review-file"
-    cache_include_topology: bool = False
+    cache_include_topology: bool = True
     l2_validate: bool = False
 
 

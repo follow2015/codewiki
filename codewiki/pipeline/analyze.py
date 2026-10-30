@@ -42,6 +42,7 @@ from codewiki.pipeline.incremental import (
 )
 from codewiki.render.diagnostics_md import write_diagnostics_md
 from codewiki.render.diagrams import render_all
+from codewiki.render.i18n import set_lang
 from codewiki.render.jsonio import write_packet
 from codewiki.render.site import (
     INDEX_HTML,
@@ -259,6 +260,7 @@ def run(request: AnalyzeRequest) -> int:
         else:
             print(f"解析统计（--no-cache）：解析 {stats.miss} / 失败 {stats.failed}")
 
+    set_lang(cfg.project.lang)
     packet = packet_from_parts(
         title=cfg.title if cfg.project.name else root.name,
         layers=cfg.layers_as_nodes(),

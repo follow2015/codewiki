@@ -17,9 +17,9 @@ from codewiki.ai.agent import AgentLoop
 from codewiki.ai.audit import AUDIT_FILENAME, AuditLog
 from codewiki.ai.client import OpenAICompatClient, resolve_model
 from codewiki.config import CONFIG_FILENAME, ConfigError
-from codewiki.trust import load_trusted_config
+from codewiki.trust import ai_denied, load_trusted_config
 
-from .context import load_packet_for_cli, trusted
+from .context import force_ai, load_packet_for_cli, trusted
 
 
 def agent(args: argparse.Namespace) -> int:
@@ -33,6 +33,10 @@ def agent(args: argparse.Namespace) -> int:
         )
     except ConfigError as exc:
         print(f"error: {exc}", file=sys.stderr)
+        return 2
+    denied = ai_denied(cfg, force=force_ai(args))
+    if denied:
+        print(denied, file=sys.stderr)
         return 2
     model = resolve_model(cli_value=args.model, config_value=cfg.ai.model)
     if not model:

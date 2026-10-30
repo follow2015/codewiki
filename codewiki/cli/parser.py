@@ -20,6 +20,7 @@ from .agent_cmd import agent
 from .analyze_cmd import analyze
 from .annotate_cmd import WRITE_BACK_POLICIES, annotate
 from .cycles_cmd import cycles
+from .diagram_cmd import diagram
 from .diff_cmd import diff
 from .doctor_cmd import doctor
 from .export_cmd import export
@@ -153,9 +154,47 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="信任配置里的 [ai] base_url/model/write_back（默认忽略：该文件来自被分析仓库）",
     )
+    annotate_cmd.add_argument(
+        "--force-ai",
+        action="store_true",
+        help="仓库声明了 [ai] enabled = false（项目方不要 AI）时仍然执行",
+    )
     annotate_cmd.add_argument("--top-n", type=int, help="标注前 N 个热点模块")
     annotate_cmd.add_argument("--budget", type=int, help="单轮 token 硬上限")
     annotate_cmd.set_defaults(func=annotate)
+
+    diagram_cmd = sub.add_parser("ai-diagram", help="AI 时序图（基于静态调用链，独立命令）")
+    diagram_cmd.add_argument("--input", default="wiki-output/data/codewiki.json", help="analyze 产出的数据包")
+    diagram_cmd.add_argument("--config", help=f"配置路径（默认 ./{CONFIG_FILENAME}）")
+    diagram_cmd.add_argument(
+        "--out", help="产物根目录（默认数据包所在产物根；图落在其下 diagrams/sequences/）"
+    )
+    diagram_cmd.add_argument("--model", help="模型名（优先于 OPENAI_MODEL 与配置）")
+    diagram_cmd.add_argument("--base-url", help="覆盖 [ai] base_url（本地 Ollama / vLLM 内网网关）")
+    diagram_cmd.add_argument(
+        "--deferred",
+        metavar="DIR",
+        help="外置推理：不发网络请求、不需要 OPENAI_API_KEY。请求写到 DIR/requests/*.json，"
+        "作答后重跑（还有待作答时退出码 3）",
+    )
+    diagram_cmd.add_argument("--top-n", type=int, help="生成前 N 条调用链的时序图（默认 3）")
+    diagram_cmd.add_argument("--depth", type=int, help="单条链的最大模块数（默认 5）")
+    diagram_cmd.add_argument(
+        "--l2-validate",
+        action="store_true",
+        help="用 mermaid-cli 做真实渲染校验（需 Node + mmdc；不可用时降级为只跑 L1）",
+    )
+    diagram_cmd.add_argument(
+        "--trust-config",
+        action="store_true",
+        help="信任配置里的 [ai] base_url/model（默认忽略：该文件来自被分析仓库）",
+    )
+    diagram_cmd.add_argument(
+        "--force-ai",
+        action="store_true",
+        help="仓库声明了 [ai] enabled = false（项目方不要 AI）时仍然执行",
+    )
+    diagram_cmd.set_defaults(func=diagram)
 
     merge_cmd = sub.add_parser("merge-annotations", help="把 AI 建议合并进 codewiki.toml")
     merge_cmd.add_argument("file", help="建议文件路径（suggestions/annotations.suggest.toml）")
@@ -218,6 +257,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--trust-config",
         action="store_true",
         help="信任配置里的 [ai] base_url/model/write_back（默认忽略：该文件来自被分析仓库）",
+    )
+    agent_cmd.add_argument(
+        "--force-ai",
+        action="store_true",
+        help="仓库声明了 [ai] enabled = false（项目方不要 AI）时仍然执行",
     )
     agent_cmd.add_argument("--max-rounds", type=int, default=10, help="最大取证轮次（防无限循环）")
     agent_cmd.add_argument(

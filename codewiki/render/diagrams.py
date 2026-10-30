@@ -17,6 +17,7 @@ from pathlib import Path
 
 from codewiki.graph.index import build_index
 from codewiki.models import NodeType
+from codewiki.render.i18n import t
 from codewiki.render.mermaid_context import render_module_context
 from codewiki.render.mermaid_macro import render_system_context
 from codewiki.render.mermaid_validator import validate_l1
@@ -176,18 +177,31 @@ def render_system_index(packet: DataPacket, pages: list[set[str]], *, max_nodes:
     paths = {n.id: (n.path or n.id) for n in packet.nodes}
     slug_map = build_slug_map([n.path for n in packet.nodes if n.type == NodeType.MODULE and n.path])
     lines = [
-        "# 宏观架构图（分页）",
+        t("# 宏观架构图（分页）", "# Architecture overview (paged)"),
         "",
-        f"节点数超过单图上限 {max_nodes}，已按层拆成 {len(pages)} 页。",
+        t(
+            f"节点数超过单图上限 {max_nodes}，已按层拆成 {len(pages)} 页。",
+            f"Node count exceeds the per-page limit ({max_nodes}); split into {len(pages)} pages by layer.",
+        ),
         "",
     ]
     for index, subset in enumerate(pages, start=1):
-        lines.append(f"## 第 {index} 页 — `{SYSTEM_STEM}-part-{index}.mmd`")
+        lines.append(
+            t(
+                f"## 第 {index} 页 — `{SYSTEM_STEM}-part-{index}.mmd`",
+                f"## Page {index} — `{SYSTEM_STEM}-part-{index}.mmd`",
+            )
+        )
         lines.append("")
         for node_id in sorted(subset):
             path = paths.get(node_id, node_id)
             slug = slug_map.get(path, _slug(path))
-            lines.append(f"- `{path}`（下钻：[{slug}.mmd](modules/{slug}.mmd)）")
+            lines.append(
+                t(
+                    f"- `{path}`（下钻：[{slug}.mmd](modules/{slug}.mmd)）",
+                    f"- `{path}` (drill down: [{slug}.mmd](modules/{slug}.mmd))",
+                )
+            )
         lines.append("")
     return "\n".join(lines)
 

@@ -13,12 +13,21 @@ from pathlib import Path
 
 from codewiki.packetio import PacketError, load_packet
 from codewiki.schemas import DataPacket
-from codewiki.trust import is_trusted
+from codewiki.trust import is_force_ai, is_trusted
 
 
 def trusted(args: argparse.Namespace) -> bool:
     """``--trust-config`` 或 ``CODEWIKI_TRUST_CONFIG=1`` 才算"我信任这份配置"。"""
     return bool(getattr(args, "trust_config", False)) or is_trusted()
+
+
+def force_ai(args: argparse.Namespace) -> bool:
+    """``--force-ai`` 或 ``CODEWIKI_FORCE_AI=1`` 才算"我确实要跑 AI"。
+
+    与 :func:`trusted` 分开：信任配置里的端点/写入策略，和绕过项目方"不要 AI"的
+    声明是两件事，共用一个开关会让人分不清自己授权了什么。
+    """
+    return bool(getattr(args, "force_ai", False)) or is_force_ai()
 
 
 def load_packet_for_cli(path: Path) -> DataPacket | None:
