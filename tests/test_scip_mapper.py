@@ -1,6 +1,6 @@
 """SCIP 映射判据（§4.6.2 准入口径：**以固定样本映射全绿为准入**）。
 
-样本由 `scripts/make_scip_sample.py` 生成并入仓（`tests/samples/scip/minimal.scip`），
+样本已入仓（`tests/samples/scip/minimal.scip`），
 覆盖三条映射规则：定义 / import / 读访问。
 
 钉住的三件事都是"看起来能跑但结果是错的"类型：

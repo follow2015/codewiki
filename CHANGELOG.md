@@ -1,7 +1,7 @@
 # 变更记录
 
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号按语义化版本。
-**数据包 schema 每次变更必须单独成行并写明升级方式**（规则见 `CONTRIBUTING.md`）。
+**数据包 schema 每次变更必须单独成行并写明升级方式**。
 
 ## [Unreleased]
 
@@ -202,9 +202,8 @@
   `IMPORT_SHADOWED`，写明选了哪个、忽略了哪个。
 - `merge-annotations` 读不懂输入时只给一行错误 + 退出码 2，不再把 tomllib / pydantic
   的 traceback（含本机绝对路径）甩到终端：畸形 TOML、缺必填字段、非 UTF-8、权限不足
-  全部收敛成 `MergeInputError`，信息里带文件名、第几条、哪个字段。`strip-comments.py`
-  对非 UTF-8 文件同样返回 2 而不是崩掉；写回改为临时文件 + `replace`（此前
-  `write_text` 中途失败会在源码里留下半截文件）。
+  全部收敛成 `MergeInputError`，信息里带文件名、第几条、哪个字段；写回改为
+  临时文件 + `replace`（此前 `write_text` 中途失败会在源码里留下半截文件）。
 
 ## [1.0.1] - 2026-10-28
 
@@ -239,7 +238,7 @@
   `@pytest.mark.guarantee("id")` 双向比对，防止文档承诺失效而无人发现。
 - `codewiki/assets/mermaid.min.js.sha256`：离线资产的 SHA-256 入库，测试与
   `scripts/fetch-mermaid-asset.sh --verify` 每次比对。
-- `CONTRIBUTING.md`、`.pre-commit-config.yaml`。
+- `.pre-commit-config.yaml`。
 
 ### 变更
 
@@ -262,9 +261,6 @@
 ### 修复
 
 - `packet_from_parts` 下沉到 `codewiki.packetio`，解开 `graph → render` 依赖环。
-- `scripts/sync-to-deploy.sh` 去掉 bash 4 依赖（本机只有 3.2），并修掉白名单通配符
-  被 shell 提前展开导致**子包整体漏同步**的问题（脚本仍 rc=0、仍打印"已覆盖"，
-  只有公开仓 CI 才照出原形）。
 - 打包：`packages.find` 的 `namespaces` 默认开启会把 `codewiki-deploy/` 副本整棵树
   打进 wheel，已关闭。
 - `Completed.truncated` 此前用 `len(stdout) > max_output` 判断，恒为假。
