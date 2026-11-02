@@ -166,6 +166,24 @@ jobs:
           test -f "$RUNNER_TEMP/proj.zip"
           echo "干净环境冲烟通过"
 
+      # 冲烟只证明"能跑通"，不证明"装在 wheel 里那份也能过测试"。这一步与
+      # release.yml 完全同款判据：**挪走源码树**（否则 cwd 里的 codewiki/ 会顶掉
+      # site-packages，测的还是源码）、再对装好的 wheel 跑套件。
+      #
+      # 为什么必须在 CI 里也有：v1.0.2 的 tag 打下去之后，Release 才在
+      # `test_i18n_catalog.py` 上红 —— 那三条门禁按源码路径做 AST 扫描，而发布
+      # 环境里源码树已被挪走。问题本身在代码里，但**发现它的时机**在打 tag 之后，
+      # 代价是一个失败的 release。这类"只在 wheel 环境才暴露"的用例必须提前红。
+      - name: 对构建出的 wheel 跑测试
+        shell: bash
+        run: |
+          "$RUNNER_TEMP/clean/bin/python" -m pip install pytest pyyaml
+          mv "$GITHUB_WORKSPACE/codewiki" "$RUNNER_TEMP/codewiki-src-hidden"
+          cd "$GITHUB_WORKSPACE"
+          "$RUNNER_TEMP/clean/bin/python" -m pytest -p no:randomly \
+            -m "not source_tree" \
+            -o pythonpath="$GITHUB_WORKSPACE" "$GITHUB_WORKSPACE/tests"
+
   treesitter:
     name: 可选后端（extra 与降级两条腿）
     runs-on: ubuntu-latest

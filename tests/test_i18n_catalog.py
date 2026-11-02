@@ -23,13 +23,23 @@ from pathlib import Path
 
 import pytest
 
+import codewiki.render
 from codewiki.render.i18n import current_lang, html_lang, normalize, set_lang, t
 from codewiki.render.locales import CATALOGS, DEFAULT_LANG
 
 REPO = Path(__file__).resolve().parent.parent
-RENDER_DIR = REPO / "codewiki" / "render"
+
+RENDER_DIR = Path(codewiki.render.__file__).resolve().parent
 
 HAN = "\u4e00-\u9fff"
+
+
+def _rel(path: Path) -> str:
+    """报错里的路径尽量相对仓库；扫到 site-packages 时退回绝对路径。"""
+    try:
+        return str(path.relative_to(REPO))
+    except ValueError:
+        return str(path)
 
 
 def _han(text: str) -> bool:
@@ -188,7 +198,7 @@ def test_no_unextracted_chinese_in_render_layer():
                 continue
             if any(node.value in text for text in texts):
                 continue
-            offenders.append(f"{path.relative_to(REPO)}:{node.lineno} {node.value[:50]!r}")
+            offenders.append(f"{_rel(path)}:{node.lineno} {node.value[:50]!r}")
 
     assert not offenders, "这些中文字面量没进语言包（确属配置键/注释请加 `# i18n-ignore`）：\n" + "\n".join(
         offenders[:15]
