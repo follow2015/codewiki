@@ -22,9 +22,9 @@ from typing import Protocol, runtime_checkable
 from codewiki.models import FileModel
 
 FORMAT_VERSIONS: dict[str, int] = {
-    "ast": 1,
-    "regex": 1,
-    "treesitter": 1,
+    "ast": 2,
+    "regex": 2,
+    "treesitter": 2,
 }
 
 

@@ -53,6 +53,7 @@ CATALOG: dict[str, str] = {
     "diagrams.page_heading": "## Page {index} — `{file}`",
     "diagrams.drill_down": "- `{path}` (drill down: [{slug}.mmd](modules/{slug}.mmd))",
     "diagrams.cycle_hint": "%% cycle hint: sink `{name}` first (most depended-on inside the cycle), so the rest flows upper → lower",
+    "diagrams.edge_type_only": "type-only",
     "diagnostics.title": "# codewiki diagnostics",
     "diagnostics.empty": "No diagnostics.",
 }

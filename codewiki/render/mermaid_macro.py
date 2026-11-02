@@ -25,6 +25,8 @@ from codewiki.schemas import DataPacket
 
 DYNAMIC_EDGE = "-.->"
 
+TYPE_ONLY_LABEL = "diagrams.edge_type_only"
+
 UNLAYERED_LABEL = "common.unlayered"
 
 
@@ -101,6 +103,11 @@ def render_system_context(
             continue
         if edge.confidence < min_confidence:
             continue
+        if edge.type_only:
+            shown = t(TYPE_ONLY_LABEL)
+            tag = f"|{shown} {edge.weight}|" if edge.weight and edge.weight > 1 else f"|{shown}|"
+            lines.append(f"  {node_id(edge.source)} {DYNAMIC_EDGE}{tag} {node_id(edge.target)}")
+            continue
         arrow = DYNAMIC_EDGE if not edge.static else "-->"
         tag = f"|{edge.weight}|" if edge.weight and edge.weight > 1 else ""
         lines.append(f"  {node_id(edge.source)} {arrow}{tag} {node_id(edge.target)}")
@@ -126,6 +133,11 @@ def _module_edges(packet: DataPacket, min_confidence: float, *, subset: set[str]
         if edge.source not in subset or edge.target not in subset:
             continue
         if layer_of.get(edge.source) != layer_of.get(edge.target):
+            continue
+        if edge.type_only:
+            out.append(
+                f"  {node_id(edge.source)} {DYNAMIC_EDGE}|{t(TYPE_ONLY_LABEL)}| {node_id(edge.target)}"
+            )
             continue
         arrow = DYNAMIC_EDGE if not edge.static else "-->"
         label = ""

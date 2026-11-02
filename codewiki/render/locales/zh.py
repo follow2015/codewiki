@@ -48,6 +48,7 @@ CATALOG: dict[str, str] = {
     "diagrams.page_heading": "## 第 {index} 页 — `{file}`",
     "diagrams.drill_down": "- `{path}`（下钻：[{slug}.mmd](modules/{slug}.mmd)）",
     "diagrams.cycle_hint": "%% 断环建议：优先下沉 `{name}`（环内被依赖最多），使其余依赖变为上层→下层",
+    "diagrams.edge_type_only": "仅类型",
     "diagnostics.title": "# codewiki 诊断",
     "diagnostics.empty": "无诊断输出。",
 }

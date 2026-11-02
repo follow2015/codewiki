@@ -56,6 +56,9 @@ class AnalysisSection(BaseModel):
     god_node_top_n: int = Field(default=10, gt=0)
     god_node_cross_layer_ratio: float = Field(default=0.5, ge=0.0, le=1.0)
     ts_aliases: dict[str, str] = Field(default_factory=dict)
+    root_package: str | None = None
+    """Python 包名与分析根目录名不一致时手工指定（如 ``--src src`` + ``from app.x import Y`` 填 ``app``）。
+    不填则用目录名，并从 import 统计里自动推断（见 ``ROOT_PACKAGE_INFERRED``）。"""
 
 
 class LayerSpec(BaseModel):

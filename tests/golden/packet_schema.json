@@ -82,6 +82,7 @@
       "type": "object"
     },
     "Edge": {
+      "additionalProperties": false,
       "description": "图谱边（§2.2 关键属性的并集）。",
       "properties": {
         "alias": {
@@ -130,6 +131,11 @@
         },
         "type": {
           "$ref": "#/$defs/EdgeType"
+        },
+        "type_only": {
+          "default": false,
+          "title": "Type Only",
+          "type": "boolean"
         },
         "weight": {
           "default": 1,
@@ -215,6 +221,13 @@
           "title": "Provenance",
           "type": "object"
         },
+        "render_inputs": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Render Inputs",
+          "type": "object"
+        },
         "repo_commit": {
           "anyOf": [
             {
@@ -249,7 +262,7 @@
           "type": "string"
         },
         "tool_version": {
-          "default": "1.0.0",
+          "default": "1.0.2",
           "title": "Tool Version",
           "type": "string"
         }
@@ -262,6 +275,7 @@
       "type": "object"
     },
     "Node": {
+      "additionalProperties": false,
       "description": "图谱节点（§2.1 必备属性的并集；各类型只用其中一部分）。",
       "properties": {
         "color": {
@@ -412,6 +426,18 @@
           "default": null,
           "title": "Path"
         },
+        "qualname": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Qualname"
+        },
         "signature": {
           "anyOf": [
             {
@@ -448,6 +474,7 @@
       "type": "string"
     },
     "Provenance": {
+      "additionalProperties": false,
       "description": "事实来源（§4.6.2）：哪个后端、什么版本产出的这条事实。\n\n一期即预留（阶段三引入 SCIP 时不必改 schema）。",
       "properties": {
         "backend": {

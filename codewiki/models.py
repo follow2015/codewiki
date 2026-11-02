@@ -67,11 +67,12 @@ _EXTRA_FORBID = ConfigDict(extra="forbid")
 
 
 class Provenance(BaseModel):
-    model_config = _EXTRA_FORBID
     """事实来源（§4.6.2）：哪个后端、什么版本产出的这条事实。
 
     一期即预留（阶段三引入 SCIP 时不必改 schema）。
     """
+
+    model_config = _EXTRA_FORBID
 
     backend: str
     version: str | None = None
@@ -113,6 +114,9 @@ class Edge(BaseModel):
     confidence: float = Field(default=CONF_STATIC, ge=0.0, le=1.0)
     weight: int = 1
     evidence: str | None = None
+    type_only: bool = False
+    """仅在 ``if TYPE_CHECKING:`` 下 import（运行时不存在）。保留边以便做变更影响分析，
+    但不参与环检测与层序计算：它不会造成运行时循环。"""
 
 
 class ImportFact(BaseModel):
@@ -131,6 +135,7 @@ class ImportFact(BaseModel):
     is_star: bool = False
     lineno: int
     kind: str = "import"
+    type_only: bool = False
 
 
 class SymbolFact(BaseModel):

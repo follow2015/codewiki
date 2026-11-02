@@ -110,6 +110,30 @@ def _all_exports(tree: ast.Module) -> list[str]:
     return []
 
 
+def _is_type_checking(test: ast.expr) -> bool:
+    """``TYPE_CHECKING`` / ``typing.TYPE_CHECKING``（不碰 ``not TYPE_CHECKING`` 等复合条件）。"""
+    if isinstance(test, ast.Name):
+        return test.id == "TYPE_CHECKING"
+    return isinstance(test, ast.Attribute) and test.attr == "TYPE_CHECKING"
+
+
+def _toplevel_imports(tree: ast.Module) -> list[tuple[ast.Import | ast.ImportFrom, bool]]:
+    """模块顶层 import，外加 ``if TYPE_CHECKING:`` 分支里的 import（标 ``type_only``）。
+
+    只看顶层与 TYPE_CHECKING 的 ``body``（``else`` 分支是运行时路径，不算）；函数内的
+    延迟 import 仍不读取 —— 它们的存在本来就是为了避开顶层循环。
+    """
+    out: list[tuple[ast.Import | ast.ImportFrom, bool]] = []
+    for node in tree.body:
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            out.append((node, False))
+        elif isinstance(node, ast.If) and _is_type_checking(node.test):
+            out.extend(
+                (child, True) for child in node.body if isinstance(child, (ast.Import, ast.ImportFrom))
+            )
+    return out
+
+
 class PythonAstAnalyzer:
     """按 ``Analyzer`` 协议实现的 Python 后端。"""
 
@@ -132,11 +156,15 @@ class PythonAstAnalyzer:
         calls: list[CallFact] = []
         inherits: list[InheritanceFact] = []
 
-        for node in tree.body:
+        for node, type_only in _toplevel_imports(tree):
             if isinstance(node, ast.Import):
                 for alias in node.names:
-                    imports.append(ImportFact(module=alias.name, alias=alias.asname, lineno=node.lineno))
-            elif isinstance(node, ast.ImportFrom):
+                    imports.append(
+                        ImportFact(
+                            module=alias.name, alias=alias.asname, lineno=node.lineno, type_only=type_only
+                        )
+                    )
+            else:
                 for alias in node.names:
                     is_star = alias.name == "*"
                     module = ("." * node.level) + (node.module or "")
@@ -148,6 +176,7 @@ class PythonAstAnalyzer:
                             is_star=is_star,
                             lineno=node.lineno,
                             kind="from",
+                            type_only=type_only,
                         )
                     )
 

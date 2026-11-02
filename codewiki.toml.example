@@ -33,6 +33,12 @@ exclude = ["tests", "scripts"]
 # 值是仓库内路径前缀（用 * 承接剩余部分）。**不去读 tsconfig** —— 只认这里。
 # 前端通常全用别名而不是相对路径，不配的话模块间一条边都连不上（全都算第三方）。
 # ts_aliases = { "@/*" = "frontend-new/src/*", "@config" = "frontend-new/src/config/app.ts" }
+# Python 包名与分析根目录名不一致时填这里（一般**不用填**：默认取 --src 的目录名，
+# 不够时会按 import 统计自动推断，并记一条 ROOT_PACKAGE_INFERRED）。
+# 什么时候需要：分析根**就是**包的内容目录、但导入写的是完整包路径 —— 例如 --src . 指向的
+# 目录叫 `repo`，代码里却是 `from app.core import run`。若 --src 指向的是包含包的上一层
+# （--src 下有 app/ 目录），保持默认即可。
+# root_package = "app"
 
 [architecture]
 # 未声明任何 [[architecture.layers]] 时，是否按目录结构推断分层（默认 true）。

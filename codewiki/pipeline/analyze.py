@@ -191,7 +191,7 @@ def run(request: AnalyzeRequest) -> int:
         models,
         min_confidence=min_confidence,
         layers=layers_cfg,
-        root_package=root.name,
+        root_package=cfg.analysis.root_package or root.name,
         ts_aliases=cfg.analysis.ts_aliases,
     )
     if derived_layers:

@@ -13,7 +13,8 @@ from __future__ import annotations
 
 from codewiki.graph.index import GraphIndex
 from codewiki.models import NodeType
-from codewiki.render.mermaid_macro import DYNAMIC_EDGE, escape_label, node_id
+from codewiki.render.i18n import t
+from codewiki.render.mermaid_macro import DYNAMIC_EDGE, TYPE_ONLY_LABEL, escape_label, node_id
 from codewiki.schemas import DataPacket
 
 
@@ -58,12 +59,18 @@ def render_module_context(
 
     lines.extend(right)
 
-    for index, (_other, confidence, static) in enumerate(upstream):
+    for index, (_other, confidence, static, type_only) in enumerate(upstream):
+        if type_only:
+            lines.append(f"  U{index} {DYNAMIC_EDGE}|{t(TYPE_ONLY_LABEL)}| M")
+            continue
         arrow = DYNAMIC_EDGE if not static else "-->"
         tag = "" if static else f"|{confidence:.2f}?|"
         lines.append(f"  U{index} {arrow}{tag} M")
 
-    for index, (_other, confidence, static) in enumerate(downstream):
+    for index, (_other, confidence, static, type_only) in enumerate(downstream):
+        if type_only:
+            lines.append(f"  M {DYNAMIC_EDGE}|{t(TYPE_ONLY_LABEL)}| D{index}")
+            continue
         arrow = DYNAMIC_EDGE if not static else "-->"
         tag = "" if static else f"|{confidence:.2f}?|"
         lines.append(f"  M {arrow}{tag} D{index}")

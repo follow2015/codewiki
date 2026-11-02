@@ -95,6 +95,8 @@ class GraphBuilder:
         self.layers_cfg = layers or []
         self.ts_aliases = ts_aliases or {}
         self.root_package = root_package or None
+        self._root_names: set[str] = {root_package} if root_package else set()
+        self.inferred_root_packages: list[str] = []
         self.nodes: dict[str, Node] = {}
         self.edges: list[Edge] = []
         self.diagnostics: list[Diagnostic] = []
@@ -110,6 +112,7 @@ class GraphBuilder:
 
     def build(self, files: list[FileModel]) -> BuildResult:
         self._files = {f.path: f for f in files}
+        self._infer_root_packages(files)
         self._index_symbols(files)
         self._build_exports()
         self._add_modules_and_symbols(files)
@@ -121,7 +124,84 @@ class GraphBuilder:
         self._aggregate_layer_dependencies()
         self._detect_cycles()
         self._warn_missing_layer_dependency()
+        self._warn_few_internal_imports()
         return BuildResult(nodes=list(self.nodes.values()), edges=self.edges, diagnostics=self.diagnostics)
+
+    def _infer_root_packages(self, files: list[FileModel]) -> None:
+        """从 import 统计里推断"包名与分析根目录名不一致"的包根（如 ``--src src`` + ``from app.x import Y``）。
+
+        只靠目录名剥前缀，换个目录名（``src`` / ``repo`` / ``checkout``）整仓绝对导入就
+        全部落空，而且没有任何提示。这里反过来用证据：对每个非 stdlib、且仓库根下
+        **不存在同名模块**的首段 ``p``，数 ``p.x.y`` 形态的绝对导入里，去掉 ``p.`` 后能在仓库内
+        命中文件的比例。同时满足 ``命中 >= 3`` 且 ``命中率 >= 50%`` 才认定为包根
+        （第三方包的子模块名几乎不会恰好撞上本仓库路径，所以阈值不必很高）。
+
+        不修改 ``root_package``（那是目录名 / 配置的原值），只往 ``_root_names`` 里加，
+        并记 ``ROOT_PACKAGE_INFERRED``，让"猜了什么"可见、可被 ``[analysis] root_package`` 覆盖。
+        """
+        seen: dict[str, list[int]] = {}
+        for file in files:
+            if file.language != "python":
+                continue
+            for imp in file.imports:
+                dotted = imp.module or ""
+                if not dotted or dotted.startswith("."):
+                    continue
+                parts = dotted.split(".")
+                head = parts[0]
+                if len(parts) < 2 or head in self._root_names or head in sys.stdlib_module_names:
+                    continue
+                stat = seen.setdefault(head, [0, 0])
+                stat[0] += 1
+                if self._probe_candidate("/".join(parts[1:])):
+                    stat[1] += 1
+        for head, (total, hit) in sorted(seen.items()):
+            if hit < 3 or hit * 2 < total or self._probe_candidate(head):
+                continue
+            self._root_names.add(head)
+            self.inferred_root_packages.append(head)
+            self.diagnostics.append(
+                Diagnostic(
+                    level="info",
+                    code="ROOT_PACKAGE_INFERRED",
+                    message=(
+                        f"推断 {head!r} 是本仓库的包根：{hit}/{total} 条 `{head}.x` 导入去掉前缀后能命中仓库内文件。"
+                        f"分析根目录名与包名不一致；如判断有误，可在 codewiki.toml 的 [analysis] 里设置 root_package。"
+                    ),
+                )
+            )
+
+    def _warn_few_internal_imports(self) -> None:
+        """几乎所有 import 都指向外部 —— 常见成因是 ``--src`` 选错了层级，而不是仓库真的"零内部依赖"。
+
+        只在样本足够（>= 50 条模块级 import）、内部占比 < 5%、且没有成功推断出包根时报；
+        真第三方依赖占绝大多数的仓库（薄封装 / 脚本集）可能误报，所以是 warning 而非 error，
+        且文案只陈述事实与可做的事，不下结论。
+        """
+        if self.inferred_root_packages:
+            return
+        internal = external = 0
+        for e in self.edges:
+            if e.type != EdgeType.IMPORTS or not e.source.startswith("mod::"):
+                continue
+            if e.target.startswith("mod::"):
+                internal += 1
+            elif e.target.startswith("ext::"):
+                external += 1
+        total = internal + external
+        if total < 50 or internal * 20 >= total:
+            return
+        self.diagnostics.append(
+            Diagnostic(
+                level="warning",
+                code="ROOT_PACKAGE_UNKNOWN",
+                message=(
+                    f"{total} 条模块级 import 里只有 {internal} 条解析到仓库内文件；"
+                    "若这是个自成一体的项目，多半是 --src 选在了包内部或目录名与包名不一致。"
+                    "可调整 --src，或在 codewiki.toml 的 [analysis] 里设置 root_package。"
+                ),
+            )
+        )
 
     def _warn_missing_layer_dependency(self) -> None:
         """配了多层却一条层间依赖都没有 —— 几乎必然是 import 整体没解析出来。
@@ -283,7 +363,9 @@ class GraphBuilder:
                 if imp.is_star:
                     target_module = self._resolve_module_path(imp.module, from_module=file.path)
                     if target_module:
-                        self._edge(mid, module_id(target_module), EdgeType.IMPORTS, weight=1)
+                        self._edge(
+                            mid, module_id(target_module), EdgeType.IMPORTS, weight=1, type_only=imp.type_only
+                        )
                     continue
 
                 if imp.module and imp.name is None:
@@ -295,26 +377,43 @@ class GraphBuilder:
                             EdgeType.IMPORTS,
                             alias=imp.alias,
                             weight=1,
+                            type_only=imp.type_only,
                         )
                     else:
-                        self._edge(mid, self._external(imp.module or ""), EdgeType.IMPORTS, alias=imp.alias)
+                        self._edge(
+                            mid,
+                            self._external(imp.module or ""),
+                            EdgeType.IMPORTS,
+                            alias=imp.alias,
+                            type_only=imp.type_only,
+                        )
                     continue
 
                 source = self._exports.get(file.path, {}).get(imp.alias or imp.name or "")
                 if source and not source.startswith("ref::"):
                     owner = self._owner_module(source)
                     if owner and owner != file.path:
-                        self._edge(mid, module_id(owner), EdgeType.IMPORTS, alias=imp.alias)
+                        self._edge(
+                            mid, module_id(owner), EdgeType.IMPORTS, alias=imp.alias, type_only=imp.type_only
+                        )
                     continue
 
                 submodule = self._resolve_submodule(imp.module, imp.name, from_module=file.path)
                 if submodule:
-                    self._edge(mid, module_id(submodule), EdgeType.IMPORTS, alias=imp.alias)
+                    self._edge(
+                        mid, module_id(submodule), EdgeType.IMPORTS, alias=imp.alias, type_only=imp.type_only
+                    )
                     continue
 
                 target_module = self._resolve_module_path(imp.module or "", from_module=file.path)
                 if target_module:
-                    self._edge(mid, module_id(target_module), EdgeType.IMPORTS, alias=imp.alias)
+                    self._edge(
+                        mid,
+                        module_id(target_module),
+                        EdgeType.IMPORTS,
+                        alias=imp.alias,
+                        type_only=imp.type_only,
+                    )
                     self.diagnostics.append(
                         Diagnostic(
                             level="info",
@@ -324,7 +423,13 @@ class GraphBuilder:
                         )
                     )
                 else:
-                    self._edge(mid, self._external(imp.module or ""), EdgeType.IMPORTS, alias=imp.alias)
+                    self._edge(
+                        mid,
+                        self._external(imp.module or ""),
+                        EdgeType.IMPORTS,
+                        alias=imp.alias,
+                        type_only=imp.type_only,
+                    )
 
     def _resolve_calls(self, files: list[FileModel]) -> None:
         for file in files:
@@ -383,6 +488,7 @@ class GraphBuilder:
     def _aggregate_layer_dependencies(self) -> None:
         """由 IMPORTS 聚合成 LAYER_DEPENDS（weight = 跨层边数，§2.2）。"""
         counts: dict[tuple[str, str], int] = {}
+        runtime: set[tuple[str, str]] = set()
         for edge in self.edges:
             if edge.type != EdgeType.IMPORTS:
                 continue
@@ -394,8 +500,16 @@ class GraphBuilder:
                 continue
             key = (src.layer_id, dst.layer_id)
             counts[key] = counts.get(key, 0) + 1
+            if not edge.type_only:
+                runtime.add(key)
         for (src_layer, dst_layer), weight in counts.items():
-            self._edge(src_layer, dst_layer, EdgeType.LAYER_DEPENDS, weight=weight)
+            self._edge(
+                src_layer,
+                dst_layer,
+                EdgeType.LAYER_DEPENDS,
+                weight=weight,
+                type_only=(src_layer, dst_layer) not in runtime,
+            )
 
     def _detect_cycles(self) -> None:
         """层级环（error，分层失效）+ 模块环（warning）。
@@ -408,10 +522,14 @@ class GraphBuilder:
         layer_graph = deterministic_digraph(
             (edge.source, edge.target)
             for edge in self.edges
-            if edge.type == EdgeType.LAYER_DEPENDS and UNLAYERED_LAYER_ID not in (edge.source, edge.target)
+            if edge.type == EdgeType.LAYER_DEPENDS
+            and not edge.type_only
+            and UNLAYERED_LAYER_ID not in (edge.source, edge.target)
         )
         module_graph = deterministic_digraph(
-            (edge.source, edge.target) for edge in self.edges if edge.type == EdgeType.IMPORTS
+            (edge.source, edge.target)
+            for edge in self.edges
+            if edge.type == EdgeType.IMPORTS and not edge.type_only
         )
 
         for component in sorted(
@@ -503,6 +621,8 @@ class GraphBuilder:
         existing = self._edge_index.get(key)
         if existing is not None:
             existing.weight += int(kwargs.get("weight", 1))
+            if existing.type_only and not kwargs.get("type_only", False):
+                existing.type_only = False
             return
         edge = Edge(source=source, target=target, type=etype, **kwargs)
         self.edges.append(edge)
@@ -563,9 +683,8 @@ class GraphBuilder:
         root_hit = self._probe_candidate(absolute)
         if (
             root_hit is None
-            and self.root_package
             and len(parts) > 1
-            and parts[0] == self.root_package
+            and parts[0] in self._root_names
             and parts[0] not in sys.stdlib_module_names
         ):
             root_hit = self._probe_candidate("/".join(parts[1:]))

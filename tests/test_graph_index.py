@@ -41,10 +41,10 @@ def test_dependency_edges_split_direction():
     )
     index = build_index(packet)
 
-    assert [o for o, _c, _s in index.dependency_edges("mod::a.py", min_confidence=0.0, direction="down")] == [
+    assert [o for o, *_rest in index.dependency_edges("mod::a.py", min_confidence=0.0, direction="down")] == [
         "mod::c.py"
     ], "本模块发出的边 = 下游"
-    assert [o for o, _c, _s in index.dependency_edges("mod::a.py", min_confidence=0.0, direction="up")] == [
+    assert [o for o, *_rest in index.dependency_edges("mod::a.py", min_confidence=0.0, direction="up")] == [
         "mod::b.py"
     ], "指向本模块的边 = 上游"
 
@@ -66,7 +66,7 @@ def test_dependency_edges_respects_min_confidence():
     index = build_index(packet)
 
     kept = index.dependency_edges("mod::a.py", min_confidence=0.5, direction="down")
-    assert [o for o, _c, _s in kept] == ["mod::b.py"], "低置信边不得进图（§0.3）"
+    assert [o for o, *_rest in kept] == ["mod::b.py"], "低置信边不得进图（§0.3）"
 
 
 def test_symbols_of_is_sorted_by_line():

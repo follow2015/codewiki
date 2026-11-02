@@ -56,12 +56,19 @@ def canonical_cycle(members: Iterable[str]) -> list[str]:
     return ring[start:] + ring[:start]
 
 
-def module_graph_from_parts(nodes: Iterable[Node], edges: Iterable[Edge]) -> nx.DiGraph:
+def module_graph_from_parts(
+    nodes: Iterable[Node], edges: Iterable[Edge], *, include_type_only: bool = True
+) -> nx.DiGraph:
     """由节点/边列表建模块级有向图（:func:`module_graph` 与建图后的管线共用）。
 
     单独拆出来是为了让"建图后立刻要算层序"的调用方（`pipeline.analyze`）不必先
     造一个完整数据包 —— 但**必须共用这一份过滤规则**：哪类边算模块依赖只该有一个
     答案，否则层序与环检测会对着同一份图给出不同结论。
+
+    ``include_type_only``：默认**包含** ``if TYPE_CHECKING:`` 下的依赖。这是有意的
+    —— 那种依赖在运行时不存在（所以不该算环），但**改它确实会弄坏类型检查**，变更
+    影响分析必须看得见。只有环检测（:func:`find_module_cycles`）传 ``False``：
+    它的结论是"运行时循环依赖"，type-only 边不该被算进去。
     """
     graph = nx.DiGraph()
     for node in nodes:
@@ -70,18 +77,22 @@ def module_graph_from_parts(nodes: Iterable[Node], edges: Iterable[Edge]) -> nx.
     for edge in edges:
         if edge.type not in (EdgeType.IMPORTS, EdgeType.CALLS, EdgeType.USES_DYNAMIC):
             continue
+        if edge.type_only and not include_type_only:
+            continue
         if edge.source.startswith("mod::") and edge.target.startswith("mod::"):
             graph.add_edge(edge.source, edge.target)
     return graph
 
 
-def module_graph(packet: DataPacket) -> nx.DiGraph:
+def module_graph(packet: DataPacket, *, include_type_only: bool = True) -> nx.DiGraph:
     """模块级有向图（只取 IMPORTS/CALLS/USES_DYNAMIC 的 mod::→mod:: 边）。
 
     符号级边不计入：环检测关心的是**模块之间的循环依赖**，符号边会把同一个
     模块对放大成几十条边，干扰 SCC 的判定（自环尤其容易被误报）。
+
+    ``include_type_only`` 的取舍见 :func:`module_graph_from_parts`。
     """
-    return module_graph_from_parts(packet.nodes, packet.edges)
+    return module_graph_from_parts(packet.nodes, packet.edges, include_type_only=include_type_only)
 
 
 def find_module_cycles(packet: DataPacket) -> list[Cycle]:
@@ -90,7 +101,7 @@ def find_module_cycles(packet: DataPacket) -> list[Cycle]:
     SCC 节点数 > 1 是真环；单节点 SCC 只有在**存在自环**时才算（模块 import 自己
     通常源于重导出的假象，但确实存在，且是真实问题）。
     """
-    graph = module_graph(packet)
+    graph = module_graph(packet, include_type_only=False)
     cycles: list[Cycle] = []
     for members in nx.strongly_connected_components(graph):
         if len(members) > 1:
@@ -166,7 +177,9 @@ def deterministic_cycles(graph: nx.DiGraph, limit: int) -> list[list[str]]:
 def find_layer_cycles(packet: DataPacket) -> list[Cycle]:
     """层级环：``LAYER_DEPENDS`` 上的简单环（分层失效，§2.5 严重诊断）。"""
     graph = deterministic_digraph(
-        (edge.source, edge.target) for edge in packet.edges if edge.type == EdgeType.LAYER_DEPENDS
+        (edge.source, edge.target)
+        for edge in packet.edges
+        if edge.type == EdgeType.LAYER_DEPENDS and not edge.type_only
     )
     cycles: list[Cycle] = []
     seen: set[tuple[str, ...]] = set()

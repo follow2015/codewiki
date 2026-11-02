@@ -7,7 +7,34 @@
 
 ### 数据包 schema
 
-- 无变更：`SCHEMA_VERSION` 仍为 `1`。
+- `Edge` 新增可选字段 `type_only`（默认 `false`）。**加法变更**，`SCHEMA_VERSION` 仍为 `1`；
+  旧数据包可直接读取，无需升级。旧版本读取新数据包会因 `extra=forbid` 拒绝该字段，
+  下游消费者请先升级。
+- `ImportFact` 新增 `type_only` ⇒ **三个后端的 `FORMAT_VERSIONS` 一起升为 `2`**（ast / regex /
+  treesitter）：`ImportFact` 是 `FileModel` 的一部分，加字段会改变所有后端的 `model_dump`
+  摘要，只升 `ast` 会让 regex / treesitter 的缓存继续命中旧模型（里面没有 `type_only`）。
+  缓存自动失效，重跑一次即可。
+
+### 新增
+
+- **`if TYPE_CHECKING:` 下的 import 现在会被读入**（`ImportFact.type_only`）。此前分析器只扫
+  模块顶层，这些 import 整个丢失 —— 不是"假环"，而是**缺边**（pydantic 有 85 个这样的块）。
+  现在保留为 IMPORTS 边（变更影响分析要用），但标 `type_only`，**不参与模块环与层级环
+  检测**；同一依赖只要有一处运行时 import 就不是 type-only。函数内延迟 import 仍不读取。
+  - 两条口径必须同时成立，别用一句 `if type_only: continue` 打发：改一个只在类型注解里
+    被依赖的模块，会弄坏 `if TYPE_CHECKING` 那一侧的注解检查 ⇒ **变更影响分析要看得到**；
+    但运行时不存在 ⇒ **环检测不能算它**。`module_graph_from_parts` 因此加了
+    `include_type_only`（默认 `True`），只有环检测传 `False`。
+  - 架构图里这类依赖画**虚线 + 「仅类型」标签**，与动态依赖的虚线靠标签区分 ——
+    否则图上会出现一条实线环，而诊断同时说"没有环"。
+- **包根名自动推断**：分析根**就是包的内容目录**、而目录名与包名不一致时（目录叫 `src`，
+  导入却写 `from app.core import Y`，即 `app/` 这层已不在分析范围内），此前整仓绝对导入
+  静默落成 external，图稀疏、环全部消失（networkx 实测：193 个孤立模块、0 个环，实际为
+  2 个、5 个）。现在按 import 统计推断（命中 ≥3 且命中率 ≥50%，且根下无同名模块），记
+  `ROOT_PACKAGE_INFERRED`（info）；可用 `[analysis] root_package` 手工指定。
+  注意 `--src src`（`src/` 下还有 `app/` 一层）**本来就能解析**，不需要推断。
+- `ROOT_PACKAGE_UNKNOWN`（warning）：≥50 条模块级 import 而仓内解析占比 <5% 且未能推断时提示
+  检查 `--src`。
 
 ## [1.0.2] - 2026-11-02
 

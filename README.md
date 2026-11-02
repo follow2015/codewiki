@@ -57,6 +57,12 @@ wiki-output/
   └── diagnostics.md             # 未分层 / 环 / 解析告警 / 资源缺失
 ```
 
+> `--src` 该指向**包含包的上一层目录**。指进包内部时，`from app.core import run` 这类
+> 绝对导入会因为少了一层前缀全部落空 —— 症状是 `diagnostics.md` 里出现
+> `ROOT_PACKAGE_UNKNOWN`（几百条 import 几乎全算第三方）、图上模块彼此孤立。多数情况
+> 调对 `--src` 即可；确实无法调整目录结构时，用 `[analysis] root_package` 指定包名
+> （自动推断覆盖不到的场景见 `codewiki.toml.example`）。
+
 ## 命令
 
 | 命令 | 作用 | 需要 AI |

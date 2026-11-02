@@ -11,16 +11,16 @@
     "python": {
       "ast": {
         "calls": 1,
-        "digest": "f658e45825b40dfe43693f6e0a8f25e0ecee44af18fa95732bc70ef52c7b30eb",
-        "format_version": 1,
+        "digest": "b0eb4fabf03499d18b1115bb8bebacc6d40e235eebcd45d7e4c52be9e93658f8",
+        "format_version": 2,
         "imports": 2,
         "inherits": 0,
         "symbols": 6
       },
       "regex": {
         "calls": 0,
-        "digest": "490491bffc7b1e7f083612e32b6e1bc460a4a5e0eb54510ae8605b9c699b6c90",
-        "format_version": 1,
+        "digest": "80251e4acf315a4ee6eff15de5810515efc32e32ff8022ad62901265fe94f6c3",
+        "format_version": 2,
         "imports": 2,
         "inherits": 0,
         "symbols": 5
@@ -29,8 +29,8 @@
     "typescript": {
       "treesitter": {
         "calls": 2,
-        "digest": "963acf0dfa491253ef015352c402e8c93dc742404a83c0f81b7b1ac87a178d16",
-        "format_version": 1,
+        "digest": "f2e6d36a833accdd16318a63f73ee7d6d3d0d8d2811247258eebf79e51583c78",
+        "format_version": 2,
         "imports": 1,
         "inherits": 1,
         "symbols": 5
@@ -39,8 +39,8 @@
     "go": {
       "treesitter": {
         "calls": 1,
-        "digest": "a00f2efc5c47f72ce0381f26f2db167d63bc96ca1729253e712a5fc1e064f2d5",
-        "format_version": 1,
+        "digest": "33f1c6be472b1ffea0946457cbb9079b5b0d4437672bf2881a5477ad0b20ac88",
+        "format_version": 2,
         "imports": 2,
         "inherits": 0,
         "symbols": 5

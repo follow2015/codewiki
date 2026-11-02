@@ -54,17 +54,22 @@ class GraphIndex:
 
     def dependency_edges(
         self, module_id: str, *, min_confidence: float, direction: str
-    ) -> list[tuple[str, float, bool]]:
-        """模块的依赖边（``direction`` = ``up`` / ``down``），已按置信度过滤。"""
+    ) -> list[tuple[str, float, bool, bool]]:
+        """模块的依赖边（``direction`` = ``up`` / ``down``），已按置信度过滤。
+
+        四元组是 ``(对端 id, 置信度, static, type_only)``。``type_only`` 必须一路带到
+        渲染层：``if TYPE_CHECKING:`` 下的依赖在运行时不存在，画成实线就会让图上出现
+        一条诊断同时说"没有环"的边。
+        """
         edges = self.in_edges.get(module_id, ()) if direction == "up" else self.out_edges.get(module_id, ())
-        out: list[tuple[str, float, bool]] = []
+        out: list[tuple[str, float, bool, bool]] = []
         for edge in edges:
             if edge.type not in (EdgeType.IMPORTS, EdgeType.CALLS):
                 continue
             if edge.confidence < min_confidence:
                 continue
             other = edge.source if direction == "up" else edge.target
-            out.append((other, edge.confidence, edge.static))
+            out.append((other, edge.confidence, edge.static, edge.type_only))
         return out
 
     def neighbors(self, module_id: str) -> tuple[dict[str, str], dict[str, str]]:
