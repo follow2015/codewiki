@@ -5,6 +5,8 @@
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-11-02
+
 ### 数据包 schema
 
 - `Edge` 新增可选字段 `type_only`（默认 `false`）。**加法变更**，`SCHEMA_VERSION` 仍为 `1`；
@@ -35,6 +37,16 @@
   注意 `--src src`（`src/` 下还有 `app/` 一层）**本来就能解析**，不需要推断。
 - `ROOT_PACKAGE_UNKNOWN`（warning）：≥50 条模块级 import 而仓内解析占比 <5% 且未能推断时提示
   检查 `--src`。
+
+### 修复
+
+- **`Provenance` 的 schema `description` 恢复**：它的 docstring 此前写在 `model_config`
+  之后，而类体第一个语句必须是字符串才算类文档字符串 —— pydantic 因此从未输出这段
+  描述，字段说明在 schema 里静默消失。把 docstring 移回类首即恢复，描述内容不变。
+  同时把 `packet_schema.json` 黄金补到实际状态（`additionalProperties: false`、
+  `Meta.render_inputs`、`Node.qualname`、`tool_version` 默认值）：黄金长期落后于模型，
+  只因比对规则只查"少字段/必填性变化"才一直没红。不涉及字段语义，`SCHEMA_VERSION`
+  仍为 `1`。
 
 ## [1.0.2] - 2026-11-02
 
