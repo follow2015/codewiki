@@ -9,6 +9,12 @@
 
 - 无变更：`SCHEMA_VERSION` 仍为 `1`。
 
+## [1.0.2] - 2026-11-02
+
+### 数据包 schema
+
+- 无变更：`SCHEMA_VERSION` 仍为 `1`。
+
 ### 新增
 
 - **`codewiki ai-diagram`：AI 时序图接上生产入口**。`ai/diagram.py` 此前是个孤儿
@@ -303,6 +309,22 @@
   的 traceback（含本机绝对路径）甩到终端：畸形 TOML、缺必填字段、非 UTF-8、权限不足
   全部收敛成 `MergeInputError`，信息里带文件名、第几条、哪个字段；写回改为
   临时文件 + `replace`（此前 `write_text` 中途失败会在源码里留下半截文件）。
+- **产物不可复现：同一份输入只换 `PYTHONHASHSEED`，产物就有四个文件不同**。
+  实测 ipip 同一份源码跑两次（只改种子），`index.md` / `diagnostics.md` /
+  `diagnostics.html` / `codewiki.json` 全部不同 —— 连 `SOURCE_DATE_EPOCH`
+  固定时间戳也救不回来，因为差的不是时间，而是 `LAYER_CYCLE` 的**文本**。
+  - 根因是 `nx.simple_cycles`：Johnson 算法按图节点序逐个当 startnode 展开，
+    内部又用 set 做 block/unblock。实测把节点序、边序都用 `sorted` 固定之后，
+    换种子它**仍然**会换起点（seed=0/1 从「基础设施」开始、seed=3 从「服务层」
+    开始）—— 固定建图顺序不够，只能在结果层自己枚举。
+  - 新增 `deterministic_cycles()`：按节点字典序当 start、只往字典序更大的节点
+    走，于是每个环恰好在最小成员处被发现一次（起点天然规范、天然去重）；配
+    `canonical_cycle()` 把环旋转到最小成员（**只旋转不重排** —— 走向有语义，
+    断环建议要用）。建图换成 `deterministic_digraph()`，SCC 分量也排序，
+    否则多条环的诊断顺序照样会飘。
+  - 代表环的候选窗口开到 3×4 再按环长排序取前 3：原本只取 N+1 条，挑到的全是
+    DFS 最先撞见的那几条（实测 3 条都以同一层开头），而最短的环才该先修。
+  - 判据：ipip 四个种子（0–3）产物逐字节一致；`--incremental` 产物仍与全量一致。
 
 ## [1.0.1] - 2026-10-28
 

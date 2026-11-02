@@ -15,13 +15,13 @@
 
 from __future__ import annotations
 
-import itertools
 import posixpath
 import sys
 from dataclasses import dataclass, field
 
 import networkx as nx
 
+from codewiki.graph.analysis import canonical_cycle, deterministic_cycles, deterministic_digraph
 from codewiki.layering import UNLAYERED_LAYER_ID, layer_of
 from codewiki.models import (
     CONF_DYNAMIC,
@@ -42,6 +42,8 @@ from codewiki.schemas import Diagnostic
 MAX_REEXPORT_HOPS = 10
 
 MAX_CYCLES_PER_COMPONENT = 3
+
+_CYCLE_PROBE_FACTOR = 4
 
 JS_SUFFIXES: tuple[str, ...] = (".ts", ".tsx", ".d.ts", ".js", ".jsx", ".mjs", ".cjs")
 
@@ -403,27 +405,29 @@ class GraphBuilder:
         了某个未分层模块，后者又 import 回 A），照算就必然报环 —— 一次部分分层
         的配置能刷出好几条 ``LAYER_CYCLE`` error，把真正的分层倒置淹掉。
         """
-        layer_graph = nx.DiGraph()
-        module_graph = nx.DiGraph()
-        for edge in self.edges:
-            if edge.type == EdgeType.LAYER_DEPENDS:
-                if UNLAYERED_LAYER_ID in (edge.source, edge.target):
-                    continue
-                layer_graph.add_edge(edge.source, edge.target)
-            elif edge.type == EdgeType.IMPORTS:
-                module_graph.add_edge(edge.source, edge.target)
+        layer_graph = deterministic_digraph(
+            (edge.source, edge.target)
+            for edge in self.edges
+            if edge.type == EdgeType.LAYER_DEPENDS and UNLAYERED_LAYER_ID not in (edge.source, edge.target)
+        )
+        module_graph = deterministic_digraph(
+            (edge.source, edge.target) for edge in self.edges if edge.type == EdgeType.IMPORTS
+        )
 
-        for component in nx.strongly_connected_components(layer_graph):
-            if len(component) < 2:
-                continue
+        for component in sorted(
+            sorted(component)
+            for component in nx.strongly_connected_components(layer_graph)
+            if len(component) > 1
+        ):
             sub = layer_graph.subgraph(component)
-            probe = list(itertools.islice(nx.simple_cycles(sub), MAX_CYCLES_PER_COMPONENT + 1))
-            for cycle in probe[:MAX_CYCLES_PER_COMPONENT]:
+            probe = deterministic_cycles(sub, MAX_CYCLES_PER_COMPONENT * _CYCLE_PROBE_FACTOR + 1)
+            ranked = sorted((canonical_cycle(cycle) for cycle in probe), key=lambda c: (len(c), c))
+            for ring in ranked[:MAX_CYCLES_PER_COMPONENT]:
                 self.diagnostics.append(
                     Diagnostic(
                         level="error",
                         code="LAYER_CYCLE",
-                        message="架构分层出现环（分层失效）: " + " → ".join([*cycle, cycle[0]]),
+                        message="架构分层出现环（分层失效）: " + " → ".join([*ring, ring[0]]),
                     )
                 )
             if len(probe) > MAX_CYCLES_PER_COMPONENT:
@@ -438,15 +442,18 @@ class GraphBuilder:
                     )
                 )
 
-        for component in nx.strongly_connected_components(module_graph):
-            if len(component) > 1:
-                self.diagnostics.append(
-                    Diagnostic(
-                        level="warning",
-                        code="MODULE_CYCLE",
-                        message="模块级依赖环: " + ", ".join(sorted(component)),
-                    )
+        for component in sorted(
+            sorted(component)
+            for component in nx.strongly_connected_components(module_graph)
+            if len(component) > 1
+        ):
+            self.diagnostics.append(
+                Diagnostic(
+                    level="warning",
+                    code="MODULE_CYCLE",
+                    message="模块级依赖环: " + ", ".join(component),
                 )
+            )
 
     def _drop_dangling_edges(self) -> None:
         """引用完整性兜底（H4）：边端点必须存在于节点表。

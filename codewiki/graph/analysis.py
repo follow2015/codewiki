@@ -35,6 +35,27 @@ class Cycle:
         return len(self.members)
 
 
+def canonical_cycle(members: Iterable[str]) -> list[str]:
+    """把环旋转到字典序最小的节点开头 —— 同一个环只留一种写法。
+
+    为什么必须做：``nx.simple_cycles`` 用 Johnson 算法，输出起点取决于**图的
+    节点插入顺序**（实测同一组边、不同插入序，同一环会被写成
+    ``数据层→服务层→数据层`` 或 ``服务层→数据层→服务层``）。而插入顺序又受上游
+    的 set/dict 迭代与 ``PYTHONHASHSEED`` 影响 ⇒ 同一份输入、同一份代码，
+    产物里的诊断文本却不同，``SOURCE_DATE_EPOCH`` 也救不回来。
+
+    **只旋转、不重排**：环的走向是有信息的（谁依赖谁，§4.2 断环建议要用），
+    按字典序重排会把 ``A→B→C→A`` 变成一个不表示任何路径的乱序列表。
+    """
+    ring = list(members)
+    if len(ring) > 2 and ring[0] == ring[-1]:
+        ring = ring[:-1]
+    if len(ring) < 2:
+        return ring
+    start = min(range(len(ring)), key=lambda i: ring[i])
+    return ring[start:] + ring[:start]
+
+
 def module_graph_from_parts(nodes: Iterable[Node], edges: Iterable[Edge]) -> nx.DiGraph:
     """由节点/边列表建模块级有向图（:func:`module_graph` 与建图后的管线共用）。
 
@@ -84,19 +105,81 @@ def find_module_cycles(packet: DataPacket) -> list[Cycle]:
     return sorted(cycles, key=lambda c: (-c.size, c.members))
 
 
+def deterministic_digraph(pairs: Iterable[tuple[str, str]]) -> nx.DiGraph:
+    """按**排序后**的节点与边建图：``simple_cycles`` 的枚举序完全由它决定。
+
+    实测（networkx 3.7）：``subgraph(nbunch)`` 的节点迭代序**跟随原图节点序**，
+    传 ``sorted(nbunch)`` 并不能改变它；Johnson 算法又按图节点序逐个当 startnode
+    展开。所以"把 nbunch 排序"是无效努力，**必须从建图这一层固定顺序**。
+    """
+    graph = nx.DiGraph()
+    ordered = sorted({(source, target) for source, target in pairs})
+    graph.add_nodes_from(sorted({node for pair in ordered for node in pair}))
+    graph.add_edges_from(ordered)
+    return graph
+
+
+def deterministic_cycles(graph: nx.DiGraph, limit: int) -> list[list[str]]:
+    """确定性地枚举最多 ``limit`` 条简单环，每个环以**字典序最小的成员**开头。
+
+    为什么不用 ``nx.simple_cycles``：实测（networkx 3.7）**同一张图**——节点序、
+    边序都由 ``sorted`` 固定——在不同 ``PYTHONHASHSEED`` 下，它给出的环起点与
+    顺序仍然不同（seed=0/1 从「基础设施」开始，seed=3 从「服务层」开始）。原因
+    是 Johnson 算法内部用 set 做 block/unblock，迭代序跟着字符串哈希走。
+    固定建图顺序救不了这一层，只能在结果层自己枚举。
+
+    做法：按节点字典序逐个当 start，且往下只走**字典序更大**的节点 —— 于是每个
+    环恰好会在它最小的成员处被发现一次（起点天然规范），也不会重复。
+
+    有界：找到 ``limit`` 条就停，避免组合爆炸（10 层全互连有 111 万条环，
+    全量枚举会把分析拖死）。
+    """
+    nodes = sorted(graph)
+    rank = {node: index for index, node in enumerate(nodes)}
+    found: list[list[str]] = []
+
+    def walk(start: str, node: str, path: list[str], on_path: set[str]) -> None:
+        if len(found) >= limit:
+            return
+        for nxt in sorted(graph.successors(node)):
+            if len(found) >= limit:
+                return
+            if nxt == start:
+                if len(path) > 1 or graph.has_edge(start, start):
+                    found.append(list(path))
+                continue
+            if nxt in on_path or rank[nxt] <= rank[start]:
+                continue
+            path.append(nxt)
+            on_path.add(nxt)
+            walk(start, nxt, path, on_path)
+            path.pop()
+            on_path.discard(nxt)
+
+    for start in nodes:
+        if len(found) >= limit:
+            break
+        walk(start, start, [start], {start})
+    return found
+
+
 def find_layer_cycles(packet: DataPacket) -> list[Cycle]:
     """层级环：``LAYER_DEPENDS`` 上的简单环（分层失效，§2.5 严重诊断）。"""
-    graph = nx.DiGraph()
-    for edge in packet.edges:
-        if edge.type == EdgeType.LAYER_DEPENDS:
-            graph.add_edge(edge.source, edge.target)
+    graph = deterministic_digraph(
+        (edge.source, edge.target) for edge in packet.edges if edge.type == EdgeType.LAYER_DEPENDS
+    )
     cycles: list[Cycle] = []
+    seen: set[tuple[str, ...]] = set()
     for members in nx.simple_cycles(graph):
-        subgraph = graph.subgraph(members)
+        ring = canonical_cycle(members)
+        if tuple(ring) in seen:
+            continue
+        seen.add(tuple(ring))
+        subgraph = graph.subgraph(ring)
         cycles.append(
             Cycle(
                 kind="layer",
-                members=sorted(members),
+                members=ring,
                 edges=sorted((u, v) for u, v in subgraph.edges() if u != v),
             )
         )
@@ -310,8 +393,10 @@ __all__ = [
     "Cycle",
     "Hotspot",
     "Impact",
+    "canonical_cycle",
     "cycles_to_diagnostics",
     "diff_packets",
+    "deterministic_digraph",
     "find_layer_cycles",
     "find_module_cycles",
     "god_node_diagnostics",

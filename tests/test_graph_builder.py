@@ -98,6 +98,41 @@ def test_layer_cycle_is_an_error_level_diagnostic():
     assert cycles and cycles[0].level == "error", "分层成环 = 分层失效，必须是 error"
 
 
+def test_layer_cycle_diagnostics_ignore_edge_insertion_order():
+    """同一组层依赖、不同边插入顺序 ⇒ 诊断逐字相同。
+
+    回归（产物不可复现）：层环原本交给 ``nx.simple_cycles``，它的起点与顺序由
+    图节点序决定，而图节点序跟着边插入序走（进而受上游 set/dict 迭代与
+    ``PYTHONHASHSEED`` 影响）。实测同一份 ipip 输入换种子，产物里 3 条
+    ``LAYER_CYCLE`` 的起点不同 ⇒ ``index.md`` / ``diagnostics.md`` /
+    ``diagnostics.html`` / ``codewiki.json`` 四个文件全部不同。
+    """
+    from codewiki.graph.builder import GraphBuilder
+    from codewiki.models import Edge, Node, NodeType
+
+    def messages(pairs):
+        builder = GraphBuilder()
+        builder.nodes = {
+            f"layer::{name}": Node(id=f"layer::{name}", type=NodeType.LAYER, name=name)
+            for name in ("A", "B", "C", "D")
+        }
+        builder.edges = [
+            Edge(source=f"layer::{src}", target=f"layer::{dst}", type=EdgeType.LAYER_DEPENDS)
+            for src, dst in pairs
+        ]
+        builder._detect_cycles()
+        return [d.message for d in builder.diagnostics]
+
+    ring = [("A", "B"), ("B", "C"), ("C", "D"), ("D", "A"), ("A", "C"), ("C", "A")]
+    baseline = messages(ring)
+
+    assert baseline == messages(list(reversed(ring))), "反转插入序就换一批环 = 不可复现"
+    assert baseline == messages(sorted(ring, key=lambda pair: pair[1])), "按终点重排同样不该变"
+    rings = [msg for msg in baseline if msg.startswith("架构分层出现环")]
+    assert rings, "这套图应当有成环"
+    assert all(msg.split(": ")[1].startswith("layer::A") for msg in rings)
+
+
 def test_stdlib_is_classified_as_stdlib():
     from codewiki.models import FileModel, ImportFact
 

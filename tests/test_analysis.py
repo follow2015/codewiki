@@ -12,10 +12,13 @@
 
 from __future__ import annotations
 
+import networkx as nx
 import pytest
 
 from codewiki.graph.analysis import (
+    canonical_cycle,
     cycles_to_diagnostics,
+    deterministic_cycles,
     diff_packets,
     find_layer_cycles,
     find_module_cycles,
@@ -76,6 +79,47 @@ def test_layer_cycle_is_error_level():
     assert len(cycles) == 1 and cycles[0].kind == "layer"
     assert [d.code for d in diagnostics] == ["LAYER_CYCLE"]
     assert diagnostics[0].level == "error", "分层失效是严重诊断（§2.5）"
+
+
+def test_canonical_cycle_rotates_to_smallest_member():
+    """同一个环的不同旋转必须写成同一串 —— 否则产物无法逐字节比对。"""
+    assert canonical_cycle(["c", "a", "b"]) == ["a", "b", "c"]
+    assert canonical_cycle(["b", "c", "a"]) == ["a", "b", "c"]
+    assert canonical_cycle(["c", "a", "b", "c"]) == ["a", "b", "c"]
+    assert canonical_cycle(["b", "a", "c"]) == ["a", "c", "b"]
+
+
+def test_deterministic_cycles_are_unique_and_canonical():
+    """每个环只出现一次，且以字典序最小的成员开头。
+
+    这是``不可复现``的根因用例：``nx.simple_cycles`` 在同一张图上换
+    ``PYTHONHASHSEED`` 就会换起点（实测 seed=0 从基础设施开始、seed=3 从服务层
+    开始），所以环枚举不能交给它。
+    """
+    graph = nx.DiGraph()
+    graph.add_edges_from([("B", "C"), ("C", "B"), ("A", "B"), ("B", "A")])
+
+    assert deterministic_cycles(graph, 10) == [["A", "B"], ["B", "C"]]
+
+
+def test_deterministic_cycles_respects_limit():
+    """有界枚举：给多少条就最多枚举多少条（防止组合爆炸）。"""
+    graph = nx.DiGraph()
+    graph.add_edges_from([("A", "B"), ("B", "A"), ("B", "C"), ("C", "B")])
+
+    assert len(deterministic_cycles(graph, 1)) == 1
+
+
+def test_deterministic_cycles_depend_only_on_structure():
+    """同样的结构、不同的建图顺序 ⇒ 同一份输出（图序不该渗进结果）。"""
+
+    def cycles_of(pairs):
+        graph = nx.DiGraph()
+        graph.add_edges_from(pairs)
+        return deterministic_cycles(graph, 10)
+
+    edges = [("A", "B"), ("B", "C"), ("C", "A"), ("C", "B")]
+    assert cycles_of(edges) == cycles_of(list(reversed(edges)))
 
 
 def test_module_cycle_diagnostic_is_warning():
