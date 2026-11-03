@@ -339,7 +339,7 @@ def test_derived_order_survives_render(tmp_path):
     _write_repo_with_bigger_core(src)
     _analyze(src, tmp_path / "out")
     mermaid = (tmp_path / "out" / "diagrams" / "system-context.mmd").read_text(encoding="utf-8")
-    assert mermaid.index('"app.api"') < mermaid.index('"app.core"')
+    assert mermaid.index("app.api") < mermaid.index("app.core")
 
 
 def test_direct_files_under_dominant_dir_keep_their_own_group():

@@ -16,10 +16,11 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from codewiki.graph.index import build_index
+from codewiki.layering import UNLAYERED_LAYER_ID
 from codewiki.models import NodeType
 from codewiki.render.i18n import t
 from codewiki.render.mermaid_context import render_module_context
-from codewiki.render.mermaid_macro import render_system_context
+from codewiki.render.mermaid_macro import UNLAYERED_LABEL, render_system_context
 from codewiki.render.mermaid_validator import validate_l1
 from codewiki.schemas import DataPacket, Diagnostic
 
@@ -28,6 +29,7 @@ SYSTEM_DIAGRAM = "system-context.mmd"
 SYSTEM_STEM = "system-context"
 SYSTEM_INDEX = "system-context-index.md"
 MODULE_SUBDIR = "modules"
+LAYER_SUBDIR = "layers"
 
 
 @dataclass
@@ -49,14 +51,23 @@ def render_all(
     min_confidence: float = 0.5,
     max_nodes: int = 300,
     only_modules: set[str] | None = None,
+    system_detail: str = "layer",
 ) -> DiagramResult:
     """渲染两类图并落盘；任一静态图校验失败即中断（返回已记的 error）。
 
     ``only_modules`` 用于**增量渲染**：只重渲集合中模块的上下文图，其余**保留
     上一轮已落盘的文件**（缺失时才补渲）。宏观/分包图反映全局，总是重渲。
+
+    ``system_detail``：``"layer"``（默认）主图**只画层间**，层内细节落到
+    ``diagrams/layers/``；``"module"`` 回到旧行为（层内逐模块 + 超限分包）。
+    默认取层间是因为模块级系统图在百模块规模上就是毛线球（pydantic 实测 474 行、
+    1600×2626），层间关系反而被淹没。
     """
     result = DiagramResult()
-    system_text = render_system_context(packet, min_confidence=min_confidence)
+    include_modules = system_detail == "module"
+    system_text = render_system_context(
+        packet, min_confidence=min_confidence, include_modules=include_modules
+    )
 
     issues = validate_l1(system_text)
     if issues:
@@ -75,7 +86,8 @@ def render_all(
     diagrams_dir.mkdir(parents=True, exist_ok=True)
 
     module_nodes = [n for n in packet.nodes if n.type == NodeType.MODULE]
-    if _count_nodes(system_text) > max_nodes and len(module_nodes) > 1:
+    renders_modules = include_modules or not packet.layers
+    if renders_modules and _count_nodes(system_text) > max_nodes and len(module_nodes) > 1:
         pages = _paginate(packet, max_nodes)
         for index, subset in enumerate(pages, start=1):
             text = render_system_context(packet, min_confidence=min_confidence, subset=subset)
@@ -119,6 +131,15 @@ def render_all(
         if stale_index.exists():
             stale_index.unlink()
 
+    if not include_modules:
+        layer_files, problem = _render_layer_diagrams(
+            packet, diagrams_dir, min_confidence=min_confidence
+        )
+        if problem is not None:
+            result.diagnostics.append(problem)
+            return result
+        result.files.extend(layer_files)
+
     modules_dir = diagrams_dir / MODULE_SUBDIR
     index = build_index(packet)
     slug_map = build_slug_map([n.path for n in packet.nodes if n.type == NodeType.MODULE and n.path])
@@ -147,6 +168,53 @@ def render_all(
         result.files.append(target)
 
     return result
+
+
+def _render_layer_diagrams(
+    packet: DataPacket, diagrams_dir: Path, *, min_confidence: float
+) -> tuple[list[Path], Diagnostic | None]:
+    """每层一张模块级图（``diagrams/layers/``）。
+
+    系统图只画层间之后，这张图承担"这一层里有什么"。不做分页：层本身已按目录
+    下钻（自动分层会把超大的组继续拆），单层再超限说明分层配置该调了。
+    """
+    layers_dir = diagrams_dir / LAYER_SUBDIR
+    layers_dir.mkdir(parents=True, exist_ok=True)
+
+    modules = [n for n in packet.nodes if n.type == NodeType.MODULE]
+    layers = sorted(packet.layers, key=lambda layer: layer.order if layer.order is not None else 10_000)
+    display: list[tuple[str, list]] = [
+        (layer.name or layer.id, [m for m in modules if m.layer_id == layer.id]) for layer in layers
+    ]
+    unlayered = [m for m in modules if not m.layer_id or m.layer_id == UNLAYERED_LAYER_ID]
+    if unlayered:
+        display.append((t(UNLAYERED_LABEL), unlayered))
+
+    slug_map = build_slug_map([name for name, _members in display])
+    files: list[Path] = []
+    keep: set[str] = set()
+    for name, members in display:
+        ids = {m.id for m in members}
+        if not ids:
+            continue
+        text = render_system_context(packet, min_confidence=min_confidence, subset=ids)
+        problems = validate_l1(text)
+        if problems:
+            return files, Diagnostic(
+                level="error",
+                code="DIAGRAM_INVALID",
+                message=f"层内图未通过 L1 校验，已放弃出图: {'; '.join(f'{i.code}@{i.message}' for i in problems)}",  # i18n-ignore
+                where=f"{LAYER_SUBDIR}/{slug_map[name]}",
+            )
+        target = layers_dir / f"{slug_map[name]}.mmd"
+        target.write_text(text, encoding="utf-8")
+        files.append(target)
+        keep.add(target.name)
+
+    for stale in layers_dir.glob("*.mmd"):
+        if stale.name not in keep:
+            stale.unlink()
+    return files, None
 
 
 def _paginate(packet: DataPacket, max_nodes: int) -> list[set[str]]:

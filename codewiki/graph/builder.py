@@ -671,7 +671,7 @@ class GraphBuilder:
             for _ in range(level - 1):
                 base = base.rsplit("/", 1)[0] if "/" in base else ""
             if not rest:
-                return self._probe_candidate(f"{base}/__init__.py") if base else None
+                return self._probe_candidate(f"{base}/__init__.py" if base else "__init__.py")
             return self._probe_candidate(
                 "/".join([base, *rest.split(".")]) if base else rest.replace(".", "/")
             )
@@ -679,6 +679,9 @@ class GraphBuilder:
         parts = dotted.split(".")
         absolute = "/".join(parts)
         sibling = "/".join([base, *parts]) if base else None
+
+        if self._stdlib_shadows_local(absolute, parts, from_module):
+            return None
 
         root_hit = self._probe_candidate(absolute)
         if (
@@ -692,6 +695,47 @@ class GraphBuilder:
             self._note_shadowed(sibling, root_hit, dotted, from_module)
             return root_hit
         return self._probe_candidate(sibling) if sibling else None
+
+    def _stdlib_shadows_local(self, absolute: str, parts: list[str], from_module: str) -> bool:
+        """绝对导入的首段是标准库、而"本地命中"其实落在包内 ⇒ 判标准库。
+
+        返回 ``True`` 表示调用方应落 ``External``。三个条件缺一不可：
+
+        1. 首段在 :data:`sys.stdlib_module_names` 里；
+        2. 首段不在 ``_root_names``（那是"带包名前缀"，明确指向包内，如
+           ``from pkg.typing import X``）；相对导入在更前面的分支就返回了，进不到这里；
+        3. **分析根目录本身是包**（根下有 ``__init__.py``）。
+
+        第 3 条是分水岭：根不是包时，根下的 ``json.py`` 就是顶层模块，
+        ``import json`` 会真的加载它 —— 那时连本地才是 Python 的语义。
+
+        忽略包内同名文件是**正确**行为，所以诊断级别是 ``info``：既让人知道
+        "这里有个同名文件没被用上"，又不会和真正的「仓根劫持包内」警告混为一谈。
+        """
+        head = parts[0]
+        if head not in sys.stdlib_module_names or head in self._root_names:
+            return False
+        if "__init__.py" not in self._files:
+            return False
+        local = self._probe_candidate(absolute)
+        if local is None:
+            return False
+
+        marker = (from_module, absolute)
+        if marker not in self._shadowed_reported:
+            self._shadowed_reported.add(marker)
+            self.diagnostics.append(
+                Diagnostic(
+                    level="info",
+                    code="IMPORT_SHADOWED",
+                    message=(
+                        f"绝对导入 {absolute!r} 按 Python 3 语义指向标准库，"
+                        f"包内同名文件 {local} 被忽略（要指它请用相对导入或带包名前缀）"
+                    ),
+                    where=from_module,
+                )
+            )
+        return True
 
     def _note_shadowed(self, sibling: str | None, root_hit: str, dotted: str, from_module: str) -> None:
         """根候选与包内同名候选并存时报一条诊断 —— 挑了哪个要说出来。"""

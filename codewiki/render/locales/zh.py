@@ -49,6 +49,11 @@ CATALOG: dict[str, str] = {
     "diagrams.drill_down": "- `{path}`（下钻：[{slug}.mmd](modules/{slug}.mmd)）",
     "diagrams.cycle_hint": "%% 断环建议：优先下沉 `{name}`（环内被依赖最多），使其余依赖变为上层→下层",
     "diagrams.edge_type_only": "仅类型",
+    "diagrams.ext_stdlib": "标准库 ({count})",
+    "diagrams.ext_third": "第三方 ({count})",
+    "diagrams.symbols_more": "…另有 {count} 个符号",
+    "diagrams.layer_node": "{name}（{count} 个模块）",
+    "diagrams.layer_page_title": "# 层内模块图：{name}",
     "diagnostics.title": "# codewiki 诊断",
     "diagnostics.empty": "无诊断输出。",
 }

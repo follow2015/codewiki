@@ -509,3 +509,27 @@ def test_absolute_import_falls_back_to_sibling_when_root_has_no_match():
     result = build_graph(files)
     imports = {(e.source, e.target) for e in result.edges if e.type == EdgeType.IMPORTS}
     assert (module_id("pkg/a.py"), module_id("pkg/utils.py")) in imports, imports
+
+
+def test_relative_import_at_package_root_resolves_to_package_init():
+    """包根模块里的 ``from . import X`` 指的是**本包的** ``__init__.py``。
+
+    此前 ``base`` 为空就直接返回 ``None`` ⇒ 落 External(".")，图上出现一个叫
+    "." 的"第三方"节点（pydantic 的 json_schema 就是这么画的）。包根模块的父级
+    就是包本身，相对路径不是空串而是 ``__init__.py``。
+    """
+    from codewiki.graph import build_graph
+
+    files = [
+        _fm("__init__.py", symbols=[("X", "X", 1)]),
+        _fm("a.py", imports=[(".", "X", 1)]),
+    ]
+    result = build_graph(files)
+    imports = {(e.source, e.target) for e in result.edges if e.type == EdgeType.IMPORTS}
+
+    assert (module_id("a.py"), module_id("__init__.py")) in imports, (
+        f"包根的 from . import X 应指向 __init__.py，实际: {imports}"
+    )
+    assert (module_id("a.py"), external_id(".")) not in imports, (
+        "不应落到 External('.') —— 那不是任何一个真实模块"
+    )

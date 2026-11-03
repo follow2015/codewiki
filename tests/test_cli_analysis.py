@@ -109,8 +109,12 @@ def test_full_pipeline_smoke(mini_py, tmp_path):
     assert (tmp_path / "bundle.zip").exists()
 
 
-def test_large_repo_pages_instead_of_crashing(mini_py, tmp_path):
-    """节点超限时首页仍要能出：改为分层架构地图，不依赖任何 mermaid 宏图。"""
+def test_large_repo_renders_layer_overview_instead_of_crashing(mini_py, tmp_path):
+    """节点超限时首页仍要能出：系统图切层间概览，天然不超限。
+
+    此前靠 ``max_nodes`` 触发按层分包来避免巨型图；层间概览的节点数 = 层数，
+    根本到不了上限 —— 分包机制仍在（模块级模式用），只是这条路径不再依赖它。
+    """
     config = tmp_path / "codewiki.toml"
     config.write_text(
         "[analysis]\nmax_nodes = 2\n\n"
@@ -125,8 +129,9 @@ def test_large_repo_pages_instead_of_crashing(mini_py, tmp_path):
         main(["analyze", "--src", str(mini_py), "--out", str(out), "--config", str(config), *NO_CACHE]) == 0
     )
 
-    assert not (out / "diagrams" / "system-context.mmd").exists()
-    assert list((out / "diagrams").glob("system-context-part-*.mmd"))
+    assert (out / "diagrams" / "system-context.mmd").exists(), "层间概览不该再触发分包"
+    assert not list((out / "diagrams").glob("system-context-part-*.mmd"))
+    assert list((out / "diagrams" / "layers").glob("*.mmd")), "层内细节要落到 layers/"
     html = (out / "index.html").read_text(encoding="utf-8")
     assert "<svg" in html and "layer-map" in html, "首页应展示分层架构地图，而不是空白"
     assert "接口层" in html, "层带要显示层名"

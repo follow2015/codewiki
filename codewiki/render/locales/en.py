@@ -54,6 +54,11 @@ CATALOG: dict[str, str] = {
     "diagrams.drill_down": "- `{path}` (drill down: [{slug}.mmd](modules/{slug}.mmd))",
     "diagrams.cycle_hint": "%% cycle hint: sink `{name}` first (most depended-on inside the cycle), so the rest flows upper → lower",
     "diagrams.edge_type_only": "type-only",
+    "diagrams.ext_stdlib": "stdlib ({count})",
+    "diagrams.ext_third": "third-party ({count})",
+    "diagrams.symbols_more": "…{count} more symbols",
+    "diagrams.layer_node": "{name} ({count} modules)",
+    "diagrams.layer_page_title": "# Modules in layer: {name}",
     "diagnostics.title": "# codewiki diagnostics",
     "diagnostics.empty": "No diagnostics.",
 }

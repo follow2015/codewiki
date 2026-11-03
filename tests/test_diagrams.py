@@ -53,10 +53,10 @@ def test_pagination_removes_stale_single_macro_diagram(mini_py, tmp_path):
     from codewiki.render.diagrams import SYSTEM_DIAGRAM
 
     packet = _packet(mini_py)
-    render_all(packet, tmp_path, max_nodes=10_000)
+    render_all(packet, tmp_path, max_nodes=10_000, system_detail="module")
     assert (tmp_path / "diagrams" / SYSTEM_DIAGRAM).exists()
 
-    result = render_all(packet, tmp_path, max_nodes=0)
+    result = render_all(packet, tmp_path, max_nodes=0, system_detail="module")
 
     diagrams = tmp_path / "diagrams"
     assert not (diagrams / SYSTEM_DIAGRAM).exists(), "分包后旧主图必须删除，不许 shadow 新分包"
@@ -69,10 +69,10 @@ def test_single_macro_diagram_removes_stale_paged_files(mini_py, tmp_path):
     from codewiki.render.diagrams import SYSTEM_DIAGRAM, SYSTEM_INDEX
 
     packet = _packet(mini_py)
-    render_all(packet, tmp_path, max_nodes=0)
+    render_all(packet, tmp_path, max_nodes=0, system_detail="module")
     assert list((tmp_path / "diagrams").glob("system-context-part-*.mmd"))
 
-    render_all(packet, tmp_path, max_nodes=10_000)
+    render_all(packet, tmp_path, max_nodes=10_000, system_detail="module")
 
     diagrams = tmp_path / "diagrams"
     assert (diagrams / SYSTEM_DIAGRAM).exists()

@@ -29,6 +29,10 @@ TYPE_ONLY_LABEL = "diagrams.edge_type_only"
 
 UNLAYERED_LABEL = "common.unlayered"
 
+BACKWARD_EDGE_STYLE = "stroke:#d33,stroke-width:2px,stroke-dasharray:4 2"
+
+_UNRANKED_LAYER = 10**6
+
 
 def node_id(seed: str) -> str:
     """由任意字符串生成合法的 Mermaid 节点 ID。"""
@@ -63,11 +67,17 @@ def render_system_context(
     *,
     min_confidence: float = 0.5,
     subset: set[str] | None = None,
+    include_modules: bool = True,
 ) -> str:
     """渲染宏观架构图（返回 Mermaid 文本，不含代码围栏）。
 
     ``subset`` 用于**大图分包**：只画给定模块（跨层边仍按全局事实画，但只保留
     两端都在本页的边 —— 半条边比没有边更误导）。
+
+    ``include_modules=False`` 切换到**层间概览**：每层一个节点（标签写明模块数），
+    只画 ``LAYER_DEPENDS``。系统图默认用这个粒度 —— 模块级的系统图在 100 个模块
+    规模上就是毛线球（pydantic 实测 474 行、渲染 1600×2626），层间关系反而被淹没；
+    层内细节由每层单独的图承担。
     """
     layers = sorted(packet.layers, key=lambda layer: layer.order if layer.order is not None else 10_000)
     modules = [n for n in packet.nodes if n.type == NodeType.MODULE]
@@ -81,6 +91,9 @@ def render_system_context(
             lines.append(f'  {node_id(module.id)}["{_annotation_label(packet, module.id, label)}"]')
         lines.extend(_module_edges(packet, min_confidence, subset={m.id for m in modules}))
         return "\n".join(lines) + "\n"
+
+    if not include_modules:
+        return _render_layer_overview(packet, layers, modules, min_confidence=min_confidence)
 
     for layer in layers:
         lines.append(f'  subgraph {node_id(layer.id)}["{escape_label(layer.name)}"]')
@@ -98,23 +111,89 @@ def render_system_context(
             lines.append(f'    {node_id(module.id)}["{_annotation_label(packet, module.id, label)}"]')
         lines.append("  end")
 
+    layer_edges, backward_positions = _layer_edge_lines(packet, min_confidence, layers)
+    lines.extend(layer_edges)
+
+    lines.extend(_module_edges(packet, min_confidence, subset={m.id for m in modules}))
+
+    if backward_positions:
+        lines.append(
+            "  linkStyle "
+            + ",".join(str(position) for position in backward_positions)
+            + f" {BACKWARD_EDGE_STYLE}"
+        )
+
+    return "\n".join(lines) + "\n"
+
+
+def _render_layer_overview(
+    packet: DataPacket,
+    layers: list,
+    modules: list,
+    *,
+    min_confidence: float,
+) -> str:
+    """层间概览：每层一个节点，只画 ``LAYER_DEPENDS``。
+
+    节点标签写明模块数 —— 读者一眼能判断"这层值不值得下钻"，而不是先点进去
+    才知道里面有多少东西。未分层兜底组同样呈现（不能吞掉没归类的模块）。
+    """
+    lines = ["flowchart TD"]
+    for layer in layers:
+        members = [m for m in modules if m.layer_id == layer.id]
+        label = escape_label(t("diagrams.layer_node", name=layer.name, count=len(members)))
+        lines.append(f'  {node_id(layer.id)}["{label}"]')
+
+    unlayered = [m for m in modules if not m.layer_id or m.layer_id == UNLAYERED_LAYER_ID]
+    if unlayered:
+        label = escape_label(t("diagrams.layer_node", name=t(UNLAYERED_LABEL), count=len(unlayered)))
+        lines.append(f'  {node_id(UNLAYERED_LAYER_ID)}["{label}"]')
+
+    layer_edges, backward_positions = _layer_edge_lines(packet, min_confidence, layers)
+    lines.extend(layer_edges)
+    if backward_positions:
+        lines.append(
+            "  linkStyle "
+            + ",".join(str(position) for position in backward_positions)
+            + f" {BACKWARD_EDGE_STYLE}"
+        )
+    return "\n".join(lines) + "\n"
+
+
+def _layer_edge_lines(
+    packet: DataPacket, min_confidence: float, layers: list
+) -> tuple[list[str], list[int]]:
+    """层间边 + 反向边的位置索引。
+
+    **反向依赖**（下层反过来依赖上层）单独标红：分层倒置是图上最该先看见的东西，
+    而它与正常依赖长得一模一样（都是一条带次数的箭头）。Mermaid 只能按**边的
+    定义顺序**上色（linkStyle 用索引），所以边要收集完再统一输出，索引才对得上。
+    """
+    layer_rank = {layer.id: position for position, layer in enumerate(layers)}
+    entries: list[tuple[str, bool]] = []
     for edge in packet.edges:
         if edge.type != EdgeType.LAYER_DEPENDS:
             continue
         if edge.confidence < min_confidence:
             continue
+        backward = layer_rank.get(edge.target, _UNRANKED_LAYER) < layer_rank.get(
+            edge.source, _UNRANKED_LAYER
+        )
         if edge.type_only:
             shown = t(TYPE_ONLY_LABEL)
             tag = f"|{shown} {edge.weight}|" if edge.weight and edge.weight > 1 else f"|{shown}|"
-            lines.append(f"  {node_id(edge.source)} {DYNAMIC_EDGE}{tag} {node_id(edge.target)}")
+            entries.append(
+                (f"  {node_id(edge.source)} {DYNAMIC_EDGE}{tag} {node_id(edge.target)}", backward)
+            )
             continue
         arrow = DYNAMIC_EDGE if not edge.static else "-->"
         tag = f"|{edge.weight}|" if edge.weight and edge.weight > 1 else ""
-        lines.append(f"  {node_id(edge.source)} {arrow}{tag} {node_id(edge.target)}")
+        entries.append((f"  {node_id(edge.source)} {arrow}{tag} {node_id(edge.target)}", backward))
 
-    lines.extend(_module_edges(packet, min_confidence, subset={m.id for m in modules}))
-
-    return "\n".join(lines) + "\n"
+    return (
+        [line for line, _backward in entries],
+        [position for position, (_line, flag) in enumerate(entries) if flag],
+    )
 
 
 def _module_edges(packet: DataPacket, min_confidence: float, *, subset: set[str]) -> list[str]:
