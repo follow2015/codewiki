@@ -116,6 +116,11 @@
           "default": null,
           "title": "Evidence"
         },
+        "in_cycle": {
+          "default": false,
+          "title": "In Cycle",
+          "type": "boolean"
+        },
         "source": {
           "title": "Source",
           "type": "string"

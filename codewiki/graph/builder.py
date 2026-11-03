@@ -537,6 +537,15 @@ class GraphBuilder:
             for component in nx.strongly_connected_components(layer_graph)
             if len(component) > 1
         ):
+            members = set(component)
+            for edge in self.edges:
+                if (
+                    edge.type == EdgeType.LAYER_DEPENDS
+                    and not edge.type_only
+                    and edge.source in members
+                    and edge.target in members
+                ):
+                    edge.in_cycle = True
             sub = layer_graph.subgraph(component)
             probe = deterministic_cycles(sub, MAX_CYCLES_PER_COMPONENT * _CYCLE_PROBE_FACTOR + 1)
             ranked = sorted((canonical_cycle(cycle) for cycle in probe), key=lambda c: (len(c), c))
@@ -572,6 +581,15 @@ class GraphBuilder:
                     message="模块级依赖环: " + ", ".join(component),
                 )
             )
+            members = set(component)
+            for edge in self.edges:
+                if (
+                    edge.type == EdgeType.IMPORTS
+                    and not edge.type_only
+                    and edge.source in members
+                    and edge.target in members
+                ):
+                    edge.in_cycle = True
 
     def _drop_dangling_edges(self) -> None:
         """引用完整性兜底（H4）：边端点必须存在于节点表。

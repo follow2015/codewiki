@@ -16,9 +16,14 @@ from __future__ import annotations
 
 from codewiki.graph import build_graph
 from codewiki.graph.builder import module_id
-from codewiki.models import FileModel, ImportFact, SymbolFact
+from codewiki.models import Edge, EdgeType, FileModel, ImportFact, Node, NodeType, SymbolFact
 from codewiki.packetio import packet_from_parts
-from codewiki.render.mermaid_context import render_module_context
+from codewiki.render.mermaid_context import (
+    DEFAULT_MAX_NEIGHBORS,
+    DEFAULT_MAX_SYMBOLS,
+    MIN_VISIBLE_SYMBOLS,
+    render_module_context,
+)
 
 
 def _fm(path, *, imports=(), symbols=()):
@@ -81,11 +86,15 @@ def test_symbol_leaves_are_capped_and_the_rest_is_folded():
 
 
 def test_symbol_cap_is_configurable():
-    """上限可配：小图想要全量时能关掉折叠。"""
+    """上限可配：小图想要全量时能关掉折叠。
+
+    ``max_symbols=None`` 是"别折"的开关；传具体数字仍受右列行数预算约束
+    （符号和下游挤在同一列，各自封顶管不住总高度）。
+    """
     symbols = [(f"s{i}", f"s{i}", i + 1) for i in range(30)]
     packet = _packet([_fm("big.py", symbols=symbols)])
 
-    text = render_module_context(packet, module_id("big.py"), max_symbols=30)
+    text = render_module_context(packet, module_id("big.py"), max_symbols=None)
     assert text.count("M --- ") == 30
     assert "另有" not in text
 
@@ -115,6 +124,90 @@ def test_type_only_external_group_is_dashed():
 
     text = render_module_context(packet, module_id("a.py"))
     assert "-.->" in text, f"仅类型的外部依赖组应为虚线:\n{text}"
+
+
+def _fan(*, up: int = 0, down: int = 0, symbols: int = 0):
+    """``hub.py`` 的上下文：``up`` 个模块依赖它、它依赖 ``down`` 个、提供 ``symbols`` 个符号。"""
+    hub = module_id("hub.py")
+    nodes = [Node(id=hub, type=NodeType.MODULE, path="hub.py")]
+    edges = []
+    for index in range(up):
+        other = module_id(f"u{index}.py")
+        nodes.append(Node(id=other, type=NodeType.MODULE, path=f"u{index}.py"))
+        edges.append(Edge(source=other, target=hub, type=EdgeType.IMPORTS))
+    for index in range(down):
+        other = module_id(f"d{index}.py")
+        nodes.append(Node(id=other, type=NodeType.MODULE, path=f"d{index}.py"))
+        edges.append(Edge(source=hub, target=other, type=EdgeType.IMPORTS))
+    for index in range(symbols):
+        nodes.append(
+            Node(
+                id=f"sym::hub.py::s{index}",
+                type=NodeType.SYMBOL,
+                path="hub.py",
+                name=f"s{index}",
+                module_id=hub,
+                line_start=index + 1,
+            )
+        )
+    return packet_from_parts(title="t", layers=[], nodes=nodes, edges=edges)
+
+
+def test_downstream_neighbours_are_capped_with_a_fold_note():
+    """下游超过上限时折叠，并写明还有多少个 —— 折叠是必要的，藏起来就是误导。"""
+    text = render_module_context(_fan(down=DEFAULT_MAX_NEIGHBORS + 20), module_id("hub.py"))
+
+    shown = sum(1 for ln in text.splitlines() if ln.startswith("  M -->"))
+    assert shown == DEFAULT_MAX_NEIGHBORS, f"下游应封顶在 {DEFAULT_MAX_NEIGHBORS}:\n{text[:500]}"
+    assert "另有 20 个下游模块" in text, f"折叠数量必须显式写出:\n{text[-300:]}"
+
+
+def test_upstream_neighbours_are_capped_with_a_fold_note():
+    """上游同理：一侧 98 个模块就是几屏高。"""
+    text = render_module_context(_fan(up=DEFAULT_MAX_NEIGHBORS + 5), module_id("hub.py"))
+
+    shown = sum(
+        1 for ln in text.splitlines() if ln.rstrip().endswith(" M") or "--> M" in ln or "-.-> M" in ln
+    )
+    assert shown == DEFAULT_MAX_NEIGHBORS, f"上游应封顶在 {DEFAULT_MAX_NEIGHBORS}:\n{text[:500]}"
+    assert "另有 5 个上游模块" in text
+
+
+def test_symbol_budget_shrinks_when_the_right_column_is_busy():
+    """符号与下游挤在同一列：下游吃满预算后，符号让位但至少留 ``MIN_VISIBLE_SYMBOLS`` 个。
+
+    pydantic `main.py` 实测：15 个下游 + 2 个外部组 + 12 个符号 + 2 条折叠说明 = 31 行、
+    2688px。按行数打包后同一张图 1796px。
+    """
+    text = render_module_context(_fan(down=DEFAULT_MAX_NEIGHBORS + 20, symbols=30), module_id("hub.py"))
+
+    symbol_nodes = [ln for ln in text.splitlines() if ln.endswith(")") and ln.strip().startswith("n")]
+    assert MIN_VISIBLE_SYMBOLS <= len(symbol_nodes) < DEFAULT_MAX_SYMBOLS, (
+        f"右列被下游占满后符号应让位到 [{MIN_VISIBLE_SYMBOLS}, {DEFAULT_MAX_SYMBOLS})，实际 {len(symbol_nodes)}:\n{text}"
+    )
+    assert "另有" in text and "个符号" in text, "让位掉的符号必须报数量"
+
+
+def test_symbols_keep_a_floor_even_when_the_column_is_over_budget(monkeypatch):
+    """预算被吃光时符号仍留 ``MIN_VISIBLE_SYMBOLS`` 个 —— "我能提供什么"是这张图的一半。
+
+    当前常量下预算最小也有 5，所以这条护栏平时不触发；这里把列预算压到 10 逼它触发，
+    否则它只是段没人走过的死代码。
+    """
+    from codewiki.render import mermaid_context
+
+    monkeypatch.setattr(mermaid_context, "MAX_COLUMN_BOXES", 10)
+    text = render_module_context(_fan(down=DEFAULT_MAX_NEIGHBORS + 5, symbols=30), module_id("hub.py"))
+
+    symbol_nodes = [ln for ln in text.splitlines() if ln.endswith(")") and ln.strip().startswith("n")]
+    assert len(symbol_nodes) == MIN_VISIBLE_SYMBOLS, f"预算超支时符号要保底:\n{text}"
+
+
+def test_small_context_is_not_folded():
+    """小图不折叠：3 个上游、2 个下游、5 个符号本来就是一屏。"""
+    text = render_module_context(_fan(up=3, down=2, symbols=5), module_id("hub.py"))
+
+    assert "另有" not in text, f"小图不该出现折叠说明:\n{text}"
 
 
 __all__: list[str] = []

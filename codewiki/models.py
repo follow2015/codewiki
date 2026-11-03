@@ -118,6 +118,10 @@ class Edge(BaseModel):
     """仅在 ``if TYPE_CHECKING:`` 下 import（运行时不存在）。保留边以便做变更影响分析，
     但不参与环检测与层序计算：它不会造成运行时循环。"""
 
+    in_cycle: bool = False
+    """位于模块级依赖环内（同一强连通分量）。环上的边在图上加粗标红 ——
+    "这两个模块互相 import"是必须拆的直接证据，混在普通边里看不出来。"""
+
 
 class ImportFact(BaseModel):
     """一条 import 事实。

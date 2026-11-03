@@ -60,6 +60,9 @@ class GraphIndex:
         四元组是 ``(对端 id, 置信度, static, type_only)``。``type_only`` 必须一路带到
         渲染层：``if TYPE_CHECKING:`` 下的依赖在运行时不存在，画成实线就会让图上出现
         一条诊断同时说"没有环"的边。
+
+        刻意**不**带 ``in_cycle``：环是全局信息，而模块图按模块粒度做增量复用（见
+        :func:`codewiki.render.mermaid_context.render_module_context`）。
         """
         edges = self.in_edges.get(module_id, ()) if direction == "up" else self.out_edges.get(module_id, ())
         out: list[tuple[str, float, bool, bool]] = []

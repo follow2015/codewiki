@@ -271,6 +271,13 @@ _PAGE_STYLES = """  :root {
   li { margin: .25rem 0; }
   ul, ol { padding-left: 1.3rem; }
   hr { border: none; border-top: 1px solid var(--border); margin: 1.6rem 0; }
+
+  /* diagram interactions: hover highlight + cluster focus */
+  pre.mermaid svg g.node,
+  pre.mermaid svg path.flowchart-link { transition: opacity .15s; }
+  pre.mermaid svg g.node { cursor: pointer; }
+  pre.mermaid svg .cw-dim { opacity: .15; }
+
   @media (max-width: 640px) { .wrap { padding: 1.4rem 1rem 3rem; } .md-body { padding: 1.2rem 1.1rem; } }"""
 
 _MERMAID_INIT = (
@@ -280,6 +287,93 @@ _MERMAID_INIT = (
     'securityLevel:"strict",'
     'theme:matchMedia("(prefers-color-scheme: dark)").matches?"dark":"neutral"});</script>\n'
 )
+
+_DIAGRAM_INTERACT = """<script>
+(function () {
+  "use strict";
+  var NODE_RE = /flowchart-([A-Za-z0-9_]+)-\\d+$/;
+  var EDGE_RE = /-L_([A-Za-z0-9_]+)_([A-Za-z0-9_]+)_\\d+$/;
+
+  // mermaid replaces the whole <svg> element while rendering: listeners bound
+  // to the svg (or per-node) die with the old element, and re-binding "after
+  // render" is racy. Bind ONCE on document instead and resolve the graph from
+  // rendered DOM ids at event time -- no mermaid internals involved.
+  function diagramOf(ev) {
+    if (!ev.target.closest) return null;
+    var host = ev.target.closest("pre.mermaid");
+    return host ? host.querySelector("svg") : null;
+  }
+
+  function graph(svg) {
+    var nodes = new Map();
+    svg.querySelectorAll("g.node").forEach(function (g) {
+      var m = NODE_RE.exec(g.id);
+      if (m) nodes.set(m[1], g);
+    });
+    var edges = [];
+    svg.querySelectorAll("path.flowchart-link").forEach(function (p) {
+      var m = EDGE_RE.exec(p.id);
+      if (m) edges.push({ el: p, from: m[1], to: m[2] });
+    });
+    return { nodes: nodes, edges: edges };
+  }
+
+  function highlight(svg, id) {
+    var g = graph(svg);
+    var keep = new Set([id]);
+    g.edges.forEach(function (e) {
+      if (e.from === id || e.to === id) { keep.add(e.from); keep.add(e.to); }
+    });
+    g.nodes.forEach(function (el, nid) { el.classList.toggle("cw-dim", !keep.has(nid)); });
+    g.edges.forEach(function (e) { e.el.classList.toggle("cw-dim", e.from !== id && e.to !== id); });
+  }
+
+  function clear(svg) {
+    svg.querySelectorAll(".cw-dim").forEach(function (el) { el.classList.remove("cw-dim"); });
+  }
+
+  // Cluster membership is not recoverable from DOM ids (mermaid draws clusters
+  // as sibling background rects), so keep nodes whose center falls inside the
+  // cluster rect -- dagre guarantees members sit strictly inside.
+  function focusCluster(svg, cluster) {
+    var g = graph(svg);
+    var cr = cluster.getBoundingClientRect();
+    var keep = new Set();
+    g.nodes.forEach(function (el) {
+      var r = el.getBoundingClientRect();
+      var cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+      if (cx >= cr.left && cx <= cr.right && cy >= cr.top && cy <= cr.bottom) keep.add(el);
+    });
+    if (!keep.size) return;
+    g.nodes.forEach(function (el) { el.classList.toggle("cw-dim", !keep.has(el)); });
+    g.edges.forEach(function (e) {
+      var inFocus = keep.has(g.nodes.get(e.from)) && keep.has(g.nodes.get(e.to));
+      e.el.classList.toggle("cw-dim", !inFocus);
+    });
+  }
+
+  document.addEventListener("mouseover", function (ev) {
+    var svg = diagramOf(ev);
+    if (!svg) return;
+    var g = ev.target.closest("g.node");
+    if (g && NODE_RE.exec(g.id)) highlight(svg, NODE_RE.exec(g.id)[1]);
+  });
+  document.addEventListener("mouseout", function (ev) {
+    var svg = diagramOf(ev);
+    if (svg && ev.target.closest("g.node")) clear(svg);
+  });
+  document.addEventListener("click", function (ev) {
+    var svg = diagramOf(ev);
+    if (!svg) return;
+    var g = ev.target.closest("g.node");
+    if (g && NODE_RE.exec(g.id)) { highlight(svg, NODE_RE.exec(g.id)[1]); return; }
+    var c = ev.target.closest("g.cluster");
+    if (c) { focusCluster(svg, c); return; }
+    clear(svg);  // click on empty space restores the full graph
+  });
+})();
+</script>
+"""
 
 
 def render_module_html(md: str, *, title: str, asset_prefix: str = "") -> str:
@@ -301,6 +395,7 @@ def render_module_html(md: str, *, title: str, asset_prefix: str = "") -> str:
         f'  <main class="md-body">\n{body}\n  </main>\n'
         f'  </div>\n  <script src="{asset_prefix}{MERMAID_ASSET}"></script>\n'
         f"  {_MERMAID_INIT}"
+        f"  {_DIAGRAM_INTERACT}"
         "</body>\n</html>\n"
     )
 

@@ -20,7 +20,11 @@ from codewiki.layering import UNLAYERED_LAYER_ID
 from codewiki.models import NodeType
 from codewiki.render.i18n import t
 from codewiki.render.mermaid_context import render_module_context
-from codewiki.render.mermaid_macro import UNLAYERED_LABEL, render_system_context
+from codewiki.render.mermaid_macro import (
+    UNLAYERED_LABEL,
+    render_layer_detail,
+    render_system_context,
+)
 from codewiki.render.mermaid_validator import validate_l1
 from codewiki.schemas import DataPacket, Diagnostic
 
@@ -192,10 +196,9 @@ def _render_layer_diagrams(
     files: list[Path] = []
     keep: set[str] = set()
     for name, members in display:
-        ids = {m.id for m in members}
-        if not ids:
+        if not members:
             continue
-        text = render_system_context(packet, min_confidence=min_confidence, subset=ids)
+        text = render_layer_detail(packet, layer_name=name, members=members, min_confidence=min_confidence)
         problems = validate_l1(text)
         if problems:
             return (

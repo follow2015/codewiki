@@ -40,7 +40,7 @@ def test_backward_layer_dependency_is_marked_red():
 
     styles = [ln.strip() for ln in text.splitlines() if "linkStyle" in ln]
     assert styles, f"存在反向依赖时必须输出 linkStyle:\n{text}"
-    assert styles[0] == f"linkStyle 1 {BACKWARD_COLOUR},stroke-width:2px,stroke-dasharray:4 2", (
+    assert styles[0] == f"linkStyle 2 {BACKWARD_COLOUR},stroke-width:2px,stroke-dasharray:4 2", (
         f"linkStyle 索引必须对应反向边在输出中的位置:\n{text}"
     )
 
@@ -63,7 +63,7 @@ def test_backward_marking_also_applies_to_type_only_edges():
     )
     text = render_system_context(_packet([edge]))
 
-    assert "linkStyle 0" in text, f"仅类型的反向边也要标红:\n{text}"
+    assert "linkStyle 1" in text, f"仅类型的反向边也要标红:\n{text}"
 
 
 def test_layer_overview_has_one_node_per_layer():
@@ -90,7 +90,9 @@ def test_render_all_writes_one_diagram_per_layer(tmp_path):
     assert not [d for d in result.diagnostics if d.level == "error"], result.diagnostics
     layer_files = sorted((tmp_path / "diagrams" / LAYER_SUBDIR).glob("*.mmd"))
     assert len(layer_files) == 2, f"两个非空层应各有一张图，实际: {layer_files}"
-    assert "top/a.py" in layer_files[0].read_text(encoding="utf-8")
+    text = layer_files[0].read_text(encoding="utf-8")
+    assert '["a.py"]' in text, text
+    assert "subgraph" not in text, f"只有一个目录时不必再套框:\n{text}"
 
 
 __all__: list[str] = []

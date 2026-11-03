@@ -484,3 +484,20 @@ def test_mermaid_initializes_with_explicit_security_level():
         "mermaid.initialize 里没有显式的 securityLevel:'strict' —— "
         "升级 mermaid 时默认值一变，标签里的 HTML 就会被当标记渲染"
     )
+
+
+def test_module_pages_carry_diagram_interactions(mini_py):
+    """图表交互（P2-8）要随壳注入：悬停高亮上下游 + 点层框聚焦。
+
+    交互脚本只依赖渲染后的 DOM id（``flowchart-<id>-<n>`` 与
+    ``-L_<起>_<终>_<n>``），不碰 mermaid 内部 API —— 升级 mermaid 时
+    只要这两类 id 还在，交互就还在。这里盯的是"壳里真的带了脚本与样式"。
+    """
+    html = render_module_html('# t\n\n```mermaid\nflowchart TD\n  a["A"]\n```\n', title="t")
+
+    assert "cw-dim" in html, "交互样式类没进壳"
+    assert "flowchart-link" in html, "没按 link id 反解端点"
+    assert "g.cluster" in html, "没有点层框聚焦"
+    assert 'document.addEventListener("mouseover"' in html, "必须用 document 级事件委托"
+    index = render_index_html(_packet(mini_py))
+    assert "pre.mermaid" not in index or "diagramOf" not in index, "index 没有 mermaid 图，别注入交互脚本"
