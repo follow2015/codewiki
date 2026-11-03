@@ -160,9 +160,7 @@ def _render_layer_overview(
     return "\n".join(lines) + "\n"
 
 
-def _layer_edge_lines(
-    packet: DataPacket, min_confidence: float, layers: list
-) -> tuple[list[str], list[int]]:
+def _layer_edge_lines(packet: DataPacket, min_confidence: float, layers: list) -> tuple[list[str], list[int]]:
     """层间边 + 反向边的位置索引。
 
     **反向依赖**（下层反过来依赖上层）单独标红：分层倒置是图上最该先看见的东西，
@@ -176,15 +174,11 @@ def _layer_edge_lines(
             continue
         if edge.confidence < min_confidence:
             continue
-        backward = layer_rank.get(edge.target, _UNRANKED_LAYER) < layer_rank.get(
-            edge.source, _UNRANKED_LAYER
-        )
+        backward = layer_rank.get(edge.target, _UNRANKED_LAYER) < layer_rank.get(edge.source, _UNRANKED_LAYER)
         if edge.type_only:
             shown = t(TYPE_ONLY_LABEL)
             tag = f"|{shown} {edge.weight}|" if edge.weight and edge.weight > 1 else f"|{shown}|"
-            entries.append(
-                (f"  {node_id(edge.source)} {DYNAMIC_EDGE}{tag} {node_id(edge.target)}", backward)
-            )
+            entries.append((f"  {node_id(edge.source)} {DYNAMIC_EDGE}{tag} {node_id(edge.target)}", backward))
             continue
         arrow = DYNAMIC_EDGE if not edge.static else "-->"
         tag = f"|{edge.weight}|" if edge.weight and edge.weight > 1 else ""

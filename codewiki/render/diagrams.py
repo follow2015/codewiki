@@ -132,9 +132,7 @@ def render_all(
             stale_index.unlink()
 
     if not include_modules:
-        layer_files, problem = _render_layer_diagrams(
-            packet, diagrams_dir, min_confidence=min_confidence
-        )
+        layer_files, problem = _render_layer_diagrams(packet, diagrams_dir, min_confidence=min_confidence)
         if problem is not None:
             result.diagnostics.append(problem)
             return result
@@ -200,11 +198,14 @@ def _render_layer_diagrams(
         text = render_system_context(packet, min_confidence=min_confidence, subset=ids)
         problems = validate_l1(text)
         if problems:
-            return files, Diagnostic(
-                level="error",
-                code="DIAGRAM_INVALID",
-                message=f"层内图未通过 L1 校验，已放弃出图: {'; '.join(f'{i.code}@{i.message}' for i in problems)}",  # i18n-ignore
-                where=f"{LAYER_SUBDIR}/{slug_map[name]}",
+            return (
+                files,
+                Diagnostic(
+                    level="error",
+                    code="DIAGRAM_INVALID",
+                    message=f"层内图未通过 L1 校验，已放弃出图: {'; '.join(f'{i.code}@{i.message}' for i in problems)}",  # i18n-ignore
+                    where=f"{LAYER_SUBDIR}/{slug_map[name]}",
+                ),
             )
         target = layers_dir / f"{slug_map[name]}.mmd"
         target.write_text(text, encoding="utf-8")

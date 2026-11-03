@@ -181,10 +181,8 @@ def _emit_group_edges(groups: dict[str, list], *, side: str) -> list[str]:
         if not entries:
             continue
         node = GROUP_NODE_ID[side][key]
-        if all(entry[3] for entry in entries):
-            edge = f"{DYNAMIC_EDGE}|{t(TYPE_ONLY_LABEL)}|"
-        else:
-            edge = "-->"
+        all_type_only = all(entry[3] for entry in entries)
+        edge = f"{DYNAMIC_EDGE}|{t(TYPE_ONLY_LABEL)}|" if all_type_only else "-->"
         out.append(f"  {node} {edge} M" if side == "up" else f"  M {edge} {node}")
     return out
 

@@ -36,9 +36,7 @@ def _packet(edges):
 
 def test_backward_layer_dependency_is_marked_red():
     """基础层 → 上层 是倒置，必须标红；上层 → 基础层 是正常方向。"""
-    text = render_system_context(
-        _packet([_layer_dep("top", "base"), _layer_dep("base", "top")])
-    )
+    text = render_system_context(_packet([_layer_dep("top", "base"), _layer_dep("base", "top")]))
 
     styles = [ln.strip() for ln in text.splitlines() if "linkStyle" in ln]
     assert styles, f"存在反向依赖时必须输出 linkStyle:\n{text}"

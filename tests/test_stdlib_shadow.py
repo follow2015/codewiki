@@ -41,11 +41,7 @@ def _fm(path, *, imports=(), symbols=()):
 
 
 def _import_targets(result, source: str) -> set[str]:
-    return {
-        e.target
-        for e in result.edges
-        if e.type == EdgeType.IMPORTS and e.source == module_id(source)
-    }
+    return {e.target for e in result.edges if e.type == EdgeType.IMPORTS and e.source == module_id(source)}
 
 
 def test_bare_stdlib_import_in_package_root_goes_to_stdlib():
@@ -60,8 +56,7 @@ def test_bare_stdlib_import_in_package_root_goes_to_stdlib():
     targets = _import_targets(result, "a.py")
     assert external_id("typing") in targets, f"应落 External(typing)，实际边: {targets}"
     assert module_id("typing.py") not in targets, (
-        "``import typing`` 被包内 typing.py 劫持 —— 该文件的全名是 <包>.typing，"
-        "顶层名 typing 只可能是标准库"
+        "``import typing`` 被包内 typing.py 劫持 —— 该文件的全名是 <包>.typing，顶层名 typing 只可能是标准库"
     )
 
 
@@ -121,9 +116,7 @@ def test_relative_import_still_hits_local_file():
     result = build_graph(files)
 
     targets = _import_targets(result, "a.py")
-    assert module_id("typing.py") in targets, (
-        f"相对导入不得被标准库规则抢走，实际: {targets}"
-    )
+    assert module_id("typing.py") in targets, f"相对导入不得被标准库规则抢走，实际: {targets}"
 
 
 def test_repo_root_without_init_keeps_shadowing_stdlib():
@@ -157,9 +150,7 @@ def test_non_stdlib_bare_import_keeps_existing_resolution():
     result = build_graph(files)
 
     targets = _import_targets(result, "a.py")
-    assert module_id("helpers.py") in targets, (
-        f"非标准库的绝对导入应保持原有解析结果，实际: {targets}"
-    )
+    assert module_id("helpers.py") in targets, f"非标准库的绝对导入应保持原有解析结果，实际: {targets}"
 
 
 __all__: list[str] = []
