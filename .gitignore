@@ -13,6 +13,11 @@ site/
 # 产物目录：不回提交（设计文稿 9.0 —— 产物走 CI artifact / 本地生成）
 wiki-output/
 
+# 外挂配置（configs/<target>.toml）：**使用方资产**，由 init 生成、使用方维护。
+# 与 sync-to-deploy.sh 白名单同一口径 —— 它既不进公开仓，也不该进主仓：
+# 跟踪它只会让"改了这个仓库的分析参数"混进产品提交里。
+configs/*.toml
+
 # 分析缓存（含测试夹具里被写出来的那份）：运行时产物，不入库
 .codewiki/
 
