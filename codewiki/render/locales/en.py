@@ -45,6 +45,8 @@ CATALOG: dict[str, str] = {
     "wiki.back_to_index": "[← Back to index](../{index})",
     "layer_map.root": "(root)",
     "layer_map.module_stats": "{modules} modules · {symbols} symbols",
+    "layer_map.module_count_only": "{modules} modules",
+    "layer_map.io_stats": "out {sent} · in {received}",
     "layer_map.cross_layer_top": "Top cross-layer refs {count}",
     "layer_map.no_cross_layer": "no cross-layer refs",
     "layer_map.more_flows": "… {count} more pairs",

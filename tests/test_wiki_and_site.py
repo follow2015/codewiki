@@ -405,6 +405,117 @@ def test_layer_map_respects_layer_order_and_unlayered_last():
     assert i_interface < i_service < i_infra
 
 
+def test_layer_map_omits_zero_symbol_count():
+    """符号数为 0 时只写模块数 —— 七层全写「· 0 符号」是纯噪声。"""
+    from codewiki.render.layer_map import render_layer_map_svg
+
+    packet = _packet_with_layers_and_edges(
+        [("web/a.py", "svc/b.py")],
+        layers={"web/a.py": "layer::接口层", "svc/b.py": "layer::服务层"},
+    )
+    svg = render_layer_map_svg(packet)
+
+    assert "0 符号" not in svg, f"零符号不该出现在层带上:\n{svg[:400]}"
+    assert "1 模块" in svg
+
+
+def test_layer_map_band_shows_outbound_and_inbound():
+    """层带右侧标出该层的出/入跨层引用条数，作为耦合度的第二维。"""
+    from codewiki.render.layer_map import render_layer_map_svg
+
+    packet = _packet_with_layers_and_edges(
+        [("web/a.py", "svc/b.py"), ("web/a.py", "svc/c.py"), ("svc/b.py", "svc/c.py")],
+        layers={
+            "web/a.py": "layer::接口层",
+            "svc/b.py": "layer::服务层",
+            "svc/c.py": "layer::服务层",
+        },
+    )
+    svg = render_layer_map_svg(packet)
+
+    assert "出 2 · 入 0" in svg, "接口层只出不入"
+    assert "出 0 · 入 2" in svg, "服务层只入不出（同层边不计）"
+
+
+def test_layer_map_flow_bars_are_proportional_to_counts():
+    """右栏是条形图：最重的一对占满轨道，其余按比例缩短。"""
+    import re
+
+    from codewiki.render.layer_map import render_layer_map_svg
+
+    packet = _packet_with_layers_and_edges(
+        [
+            ("web/a.py", "svc/b.py"),
+            ("web/a.py", "infra/c.py"),
+            ("web/a.py", "infra/d.py"),
+        ],
+        layers={
+            "web/a.py": "layer::接口层",
+            "svc/b.py": "layer::服务层",
+            "infra/c.py": "layer::基础设施",
+            "infra/d.py": "layer::基础设施",
+        },
+    )
+    svg = render_layer_map_svg(packet)
+
+    tracks = [
+        float(w) for w in re.findall(r'width="([\d.]+)" height="4" rx="2" style="fill:var\(--border\)"', svg)
+    ]
+    fills = [float(w) for w in re.findall(r'width="([\d.]+)" height="4" rx="2" fill="#', svg)]
+    assert len(tracks) == len(fills) == 2, f"两对跨层引用各要一条轨道 + 一条填充:\n{svg[-800:]}"
+    assert max(fills) == max(tracks), "最重的一对要占满轨道"
+    assert min(fills) < max(fills), f"较轻的一对要按比例缩短，实际: {fills}"
+
+
+def test_layer_map_columns_share_the_same_height():
+    """左右两列等高：右栏高度必须顶到最后一个层带的下沿。"""
+    import re
+
+    from codewiki.render.layer_map import BAND_GAP, BAND_H, render_layer_map_svg
+
+    packet = _packet_with_layers_and_edges([], layers={"web/a.py": "layer::A", "svc/b.py": "layer::B"})
+    svg = render_layer_map_svg(packet)
+
+    bands = 2
+    stack_h = bands * BAND_H + (bands - 1) * BAND_GAP
+    panel_heights = [float(h) for h in re.findall(r'width="300(?:\.0)?" height="([\d.]+)"', svg)]
+    assert panel_heights == [stack_h], f"右栏应顶到左列下沿 {stack_h}，实际 {panel_heights}"
+
+
+def test_index_layer_chips_carry_a_color_dot():
+    """header 的层 chips 带层色圆点 —— 只设 `--c` 却没有元素消费它等于没上色。"""
+    import re
+
+    packet = _packet_with_layers_and_edges(
+        [("web/a.py", "svc/b.py")],
+        layers={"web/a.py": "layer::接口层", "svc/b.py": "layer::服务层"},
+    )
+    html_text = render_index_html(packet)
+
+    assert 'class="chip layer"' in html_text
+    assert re.search(r'class="chip layer" style="--c:#[0-9a-f]{6}"><i></i>', html_text)
+    assert ".chip.layer i {" in html_text, "CSS 要真的消费 --c，否则圆点不显示"
+
+
+def test_index_without_layer_config_has_no_empty_overview_block():
+    """没有分层配置时不留「架构总览」空标题 —— 没有图就该整段消失。"""
+    from codewiki.render.i18n import t
+
+    packet = _packet_with_layers_and_edges([("pkg/a.py", "pkg/b.py")])
+    html_text = render_index_html(packet)
+
+    assert 'class="layer-map"' not in html_text
+    assert t("site.overview") not in html_text, "无图时标题要一起省掉"
+
+
+def test_module_cards_dim_the_directory_part():
+    """卡片里目录压暗、文件名保持正文色，680 张长路径才有落点。"""
+    packet = _packet_with_layers_and_edges([("pkg/sub/a.py", "pkg/sub/b.py")])
+    html_text = render_index_html(packet)
+
+    assert '<span class="dir">pkg/sub/</span>a.py' in html_text
+
+
 def test_hostile_module_name_cannot_break_out_of_the_href():
     """文件名里的引号不能闭合 href 属性（仓库文件名是**不可信输入**）。
 

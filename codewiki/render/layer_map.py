@@ -49,6 +49,9 @@ _UNLAYERED_ID = UNLAYERED_LAYER_ID
 
 _UNSAFE_ANCHOR = re.compile(r"[\"'<>&\s#]")
 
+BAND_H = 56.0
+BAND_GAP = 24.0
+
 
 def layer_color(name: str) -> str:
     if name in _LAYER_SEMANTIC:
@@ -115,8 +118,43 @@ def layer_anchor(lid: str) -> str:
     return "layer-" + _UNSAFE_ANCHOR.sub("_", lid)
 
 
-def _band_svg(y: float, lid: str, name: str, members: list, width: float) -> str:
-    """一条层带：色条 + 层名 + 计数 + 子包分布，整条可点击跳锚点。"""
+def _layer_flow_counts(packet: DataPacket) -> tuple[dict[str, tuple[int, int]], dict[tuple[str, str], int]]:
+    """跨层引用统计：``(每层 (出, 入), {(源层, 宿层): 条数})``。
+
+    同层边不计。出/入按节点累计，一个节点可以既出又入，两条口径互不影响。
+    """
+    node_layer = {n.id: n.layer_id for n in packet.nodes}
+    pairs: dict[tuple[str, str], int] = {}
+    sent: dict[str, int] = {}
+    received: dict[str, int] = {}
+    for edge in packet.edges:
+        src = node_layer.get(edge.source)
+        dst = node_layer.get(edge.target)
+        if not src or not dst or src == dst:
+            continue
+        weight = max(edge.weight, 1)
+        pairs[(src, dst)] = pairs.get((src, dst), 0) + weight
+        sent[src] = sent.get(src, 0) + weight
+        received[dst] = received.get(dst, 0) + weight
+    io = {lid: (sent.get(lid, 0), received.get(lid, 0)) for lid in set(sent) | set(received)}
+    return io, pairs
+
+
+def _band_svg(
+    y: float,
+    lid: str,
+    name: str,
+    members: list,
+    width: float,
+    *,
+    outbound: int = 0,
+    inbound: int = 0,
+) -> str:
+    """一条层带：色条 + 层名 + 耦合度 + 计数 + 子包分布，整条可点击跳锚点。
+
+    第一行三段：层名（左）、对外/对内引用条数（右起 140px）、模块计数（最右）。
+    第二行是子包分布。符号数为 0 时只写模块数 —— 七层全写「· 0 符号」是纯噪声。
+    """
     color = layer_color(name)
     modules = [n for n in members if n.type == NodeType.MODULE and n.path]
     symbols = len(members) - len(modules)
@@ -128,36 +166,52 @@ def _band_svg(y: float, lid: str, name: str, members: list, width: float) -> str
     top_dirs = sorted(dirs.items(), key=lambda kv: (-kv[1], kv[0]))[:4]
     dir_chips = " · ".join(f"{d} ×{c}" for d, c in top_dirs) if top_dirs else "—"
 
-    band_h = 74.0
+    if symbols:
+        stats = t("layer_map.module_stats", modules=len(modules), symbols=symbols)
+    else:
+        stats = t("layer_map.module_count_only", modules=len(modules))
+
     parts = [
         f'<a href="#{layer_anchor(lid)}" style="text-decoration:none">',
-        f'<rect x="0" y="{y}" width="{width}" height="{band_h}" rx="10" '
+        f'<rect x="0" y="{y}" width="{width}" height="{BAND_H}" rx="10" '
         'style="fill:var(--panel);stroke:var(--border);stroke-width:1"/>',
-        f'<rect x="0" y="{y}" width="5" height="{band_h}" rx="2.5" fill="{color}"/>',
-        f'<text x="22" y="{y + 30}" font-size="14.5" font-weight="650" '
+        f'<rect x="0" y="{y}" width="5" height="{BAND_H}" rx="2.5" fill="{color}"/>',
+        f'<text x="22" y="{y + 22}" font-size="14.5" font-weight="650" '
         f'style="fill:var(--text)">{_esc(name)}</text>',
-        f'<text x="{width - 18}" y="{y + 30}" font-size="11.5" text-anchor="end" '
-        f'style="fill:var(--muted)">{t("layer_map.module_stats", modules=len(modules), symbols=symbols)}</text>',
-        f'<text x="22" y="{y + 56}" font-size="10.5" style="fill:var(--faint)">{_esc(dir_chips)}</text>',
-        "</a>",
     ]
+    if outbound or inbound:
+        parts.append(
+            f'<text x="{width - 146}" y="{y + 22}" font-size="10.5" text-anchor="end" '
+            f'style="fill:var(--faint)">{t("layer_map.io_stats", sent=outbound, received=inbound)}</text>'
+        )
+    parts.extend(
+        [
+            f'<text x="{width - 18}" y="{y + 22}" font-size="12.5" font-weight="600" '
+            f'text-anchor="end" style="fill:var(--text)">{stats}</text>',
+            f'<text x="22" y="{y + 42}" font-size="10.5" style="fill:var(--faint)">{_esc(dir_chips)}</text>',
+            "</a>",
+        ]
+    )
     return "\n".join(parts)
 
 
 def render_layer_map_svg(packet: DataPacket, *, max_flows: int = 10) -> str:
-    """渲染分层架构地图（内联 SVG；无分层配置时返回空串 —— 无层不硬画）。"""
+    """渲染分层架构地图（内联 SVG；无分层配置时返回空串 —— 无硬画）。
+
+    版式：左列层带自上而下，右列跨层引用榜。两列**同高**——右栏按左列总高
+    均分行距，每行带一条按条数归一的横条，既是榜单也是条形图；此前右栏固定
+    22px 行距，七层时下半栏留 460px 空白。
+    """
     if not packet.layers:
         return ""
 
-    band_w, panel_w, gap_x = 610.0, 294.0, 36.0
-    band_h, band_gap = 74.0, 34.0
+    band_w, panel_w, gap_x = 604.0, 300.0, 36.0
     bands, names = _layer_buckets(packet)
     flows, overflow = cross_layer_flows(packet, top=max_flows)
+    io, pairs = _layer_flow_counts(packet)
 
-    stack_h = len(bands) * band_h + (len(bands) - 1) * band_gap
-    flow_rows = len(flows) + (1 if overflow > 0 else 0)
-    panel_h = 34.0 + max(flow_rows, 1) * 22.0 + 12.0
-    total_h = max(stack_h, panel_h) + 16.0
+    stack_h = len(bands) * BAND_H + (len(bands) - 1) * BAND_GAP
+    total_h = 8.0 + stack_h + 10.0
     total_w = band_w + gap_x + panel_w
 
     parts = [
@@ -166,70 +220,88 @@ def render_layer_map_svg(packet: DataPacket, *, max_flows: int = 10) -> str:
         'style="width:100%;height:auto;display:block;font-family:inherit">',
     ]
 
-    band_tops = []
-    y = 8.0
-    all_counts: dict[tuple[str, str], int] = {}
-    node_layer = {n.id: n.layer_id for n in packet.nodes}
-    for edge in packet.edges:
-        src = node_layer.get(edge.source)
-        dst = node_layer.get(edge.target)
-        if src and dst and src != dst:
-            all_counts[(src, dst)] = all_counts.get((src, dst), 0) + max(edge.weight, 1)
+    adjacency = [
+        pairs.get((bands[i][0], bands[i + 1][0]), 0) + pairs.get((bands[i + 1][0], bands[i][0]), 0)
+        for i in range(len(bands) - 1)
+    ]
+    heaviest = max(adjacency, default=0)
 
+    y = 8.0
     for index, (lid, name, members) in enumerate(bands):
-        parts.append(_band_svg(y, lid, name, members, band_w))
-        band_tops.append(y)
+        sent, received = io.get(lid, (0, 0))
+        parts.append(_band_svg(y, lid, name, members, band_w, outbound=sent, inbound=received))
         if index < len(bands) - 1:
-            next_top = y + band_h + band_gap
+            next_top = y + BAND_H + BAND_GAP
             mid_x = band_w / 2
-            pair_count = all_counts.get((lid, bands[index + 1][0]), 0) + all_counts.get(
-                (bands[index + 1][0], lid), 0
-            )
-            label = f"⇄ {pair_count}" if pair_count else ""
+            count = adjacency[index]
+            weight = 1.2 if not count else 1.2 + 2.4 * count / heaviest
+            dash = ";stroke-dasharray:3 4" if not count else ";stroke-linecap:round"
             parts.append(
-                f'<line x1="{mid_x}" y1="{y + band_h}" x2="{mid_x}" y2="{next_top}" '
-                'style="stroke:var(--border-strong);stroke-width:1.2"/>'
+                f'<line x1="{mid_x}" y1="{y + BAND_H}" x2="{mid_x}" y2="{next_top}" '
+                f'style="stroke:var(--border-strong);stroke-width:{weight:.1f}{dash}"/>'
             )
-            if label:
+            if count:
+                mid_y = (y + BAND_H + next_top) / 2
                 parts.append(
-                    f'<text x="{mid_x + 10}" y="{(y + band_h + next_top) / 2 + 4}" '
-                    f'font-size="10.5" style="fill:var(--muted)">{label}</text>'
+                    f'<rect x="{mid_x - 19}" y="{mid_y - 8}" width="38" height="16" rx="8" '
+                    'style="fill:var(--panel);stroke:var(--border);stroke-width:1"/>'
+                )
+                parts.append(
+                    f'<text x="{mid_x}" y="{mid_y + 3.5}" font-size="9.5" text-anchor="middle" '
+                    f'style="fill:var(--muted)">⇄ {count}</text>'
                 )
             y = next_top
         else:
-            y += band_h
+            y += BAND_H
 
     px = band_w + gap_x
     parts.append(
-        f'<rect x="{px}" y="8" width="{panel_w}" height="{panel_h - 16}" rx="10" '
+        f'<rect x="{px}" y="8" width="{panel_w}" height="{stack_h}" rx="10" '
         'style="fill:var(--panel-2);stroke:var(--border);stroke-width:1"/>'
     )
     parts.append(
-        f'<text x="{px + 18}" y="{34}" font-size="12" font-weight="650" '
+        f'<text x="{px + 18}" y="{30}" font-size="12" font-weight="650" '
         f'style="fill:var(--muted)">{t("layer_map.cross_layer_top", count=len(flows))}</text>'
     )
     if not flows:
         parts.append(
-            f'<text x="{px + 18}" y="{60}" font-size="11" style="fill:var(--faint)">{t("layer_map.no_cross_layer")}</text>'
+            f'<text x="{px + 18}" y="{58}" font-size="11" style="fill:var(--faint)">'
+            f"{t('layer_map.no_cross_layer')}</text>"
         )
-    row_y = 60.0
+        parts.append("</svg>")
+        return "\n".join(parts)
+
+    header, footnote = 40.0, 26.0 if overflow > 0 else 12.0
+    row_h = min(46.0, max(20.0, (stack_h - header - footnote) / len(flows)))
+    top_count = flows[0][1] or 1
+    bar_max = panel_w - 44.0
+    row_y = 8.0 + header
     for (src_lid, dst_lid), count in flows:
         src_color = layer_color(names.get(src_lid, src_lid))
         flow_label = f"{_display_name(src_lid, names)} → {_display_name(dst_lid, names)}"
-        parts.append(f'<circle cx="{px + 22}" cy="{row_y - 4}" r="4" fill="{src_color}"/>')
         parts.append(
-            f'<text x="{px + 34}" y="{row_y}" font-size="11" '
+            f'<text x="{px + 20}" y="{row_y}" font-size="11" '
             f'style="fill:var(--text)">{_esc(flow_label)}</text>'
         )
         parts.append(
             f'<text x="{px + panel_w - 18}" y="{row_y}" font-size="11" '
             f'font-weight="600" text-anchor="end" style="fill:var(--text)">{count}</text>'
         )
-        row_y += 22.0
+        bar = max(2.0, bar_max * count / top_count)
+        parts.append(
+            f'<rect x="{px + 20}" y="{row_y + 11}" width="{bar_max:.1f}" height="4" rx="2" '
+            'style="fill:var(--border)" opacity="0.55"/>'
+        )
+        parts.append(
+            f'<rect x="{px + 20}" y="{row_y + 11}" width="{bar:.1f}" height="4" rx="2" '
+            f'fill="{src_color}" opacity="0.9"/>'
+        )
+        row_y += row_h
     if overflow > 0:
         parts.append(
-            f'<text x="{px + 18}" y="{row_y}" font-size="10.5" '
-            f'style="fill:var(--faint)">{t("layer_map.more_flows", count=overflow)}</text>'
+            f'<text x="{px + panel_w - 18}" y="{8 + stack_h - 10}" font-size="10.5" '
+            f'text-anchor="end" style="fill:var(--faint)">'
+            f"{t('layer_map.more_flows', count=overflow)}</text>"
         )
 
     parts.append("</svg>")

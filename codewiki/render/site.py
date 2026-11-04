@@ -46,6 +46,18 @@ def _href(target: str) -> str:
     return target
 
 
+def _card_path(path: str) -> str:
+    """模块卡上的路径：目录压暗、文件名保持正文色。
+
+    一层里几百张等宽长路径时眼睛没有落点；把目录调成 faint 之后，
+    扫「文件名」就是扫对比度最高的那一段。
+    """
+    if "/" not in path:
+        return escape_text(path)
+    directory, _, name = path.rpartition("/")
+    return f'<span class="dir">{escape_text(directory)}/</span>{escape_text(name)}'
+
+
 def _inline(text: str) -> str:
     text = _LINK_RE.sub(lambda m: f'<a href="{_href(m.group(2))}">{m.group(1)}</a>', text)
     text = _BOLD_RE.sub(r"<strong>\1</strong>", text)
@@ -197,6 +209,11 @@ _PAGE_STYLES = """  :root {
     border: 1px solid var(--border); border-radius: 999px; padding: .18rem .7rem;
   }
   .chip b { color: var(--text); font-weight: 600; }
+  .chip.layer { display: inline-flex; align-items: center; gap: .38rem; }
+  .chip.layer i {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: var(--c); box-shadow: 0 0 0 2px color-mix(in srgb, var(--c) 18%, transparent);
+  }
   .chip.err { color: #dc2626; border-color: #fecaca; background: #fef2f2; }
   .hero .links { font-size: .85rem; color: var(--muted); }
   @media (prefers-color-scheme: dark) {
@@ -240,6 +257,8 @@ _PAGE_STYLES = """  :root {
     transform: translateY(-1px); color: var(--accent-text);
   }
   .mod-card code { background: none; border: none; padding: 0; }
+  .mod-card .dir { color: var(--faint); }
+  .mod-card:hover .dir { color: var(--muted); }
 
   /* ── body (module / diagnostics pages) ── */
   .md-body {
@@ -482,7 +501,7 @@ def render_index_html(packet: DataPacket) -> str:
         color = layer_color(name)
         cards = "\n".join(
             f'    <a class="mod-card" href="{MODULES_SUBDIR}/{escape_attr(slug_map[m.path])}.html">'
-            f"<code>{escape_text(m.path or '')}</code></a>"
+            f"<code>{_card_path(m.path or '')}</code></a>"
             for m in members
         )
         return (
@@ -503,9 +522,16 @@ def render_index_html(packet: DataPacket) -> str:
         f'<span class="chip"><b>{len(packet.edges)}</b> {t("site.chip_edges")}</span>{err_chip}'
     )
     layers_meta = "".join(
-        f'<span class="chip" style="--c:{layer_color(layer_names[lid])}">{len(groups[lid])} {escape_text(layer_names.get(lid, lid))}</span>'
+        f'<span class="chip layer" style="--c:{layer_color(layer_names[lid])}"><i></i>'
+        f"{len(groups[lid])} {escape_text(layer_names.get(lid, lid))}</span>"
         for lid in ordered_ids
         if lid in layer_names
+    )
+
+    overview_block = (
+        f'  <h2>{t("site.overview")}</h2>\n  <div class="layer-map">\n{layer_map_svg}\n  </div>'
+        if layer_map_svg
+        else ""
     )
 
     return f"""<!doctype html>
@@ -525,10 +551,7 @@ def render_index_html(packet: DataPacket) -> str:
     <div class="chips">{layers_meta}</div>
     <p class="links"><a href="data/codewiki.json">{t("site.data_packet")}</a> · <a href="diagnostics.html">{t("site.diagnostics")}</a></p>
   </header>
-  <h2>{t("site.overview")}</h2>
-  <div class="layer-map">
-{layer_map_svg}
-  </div>
+{overview_block}
   <div class="toolbar">
     <input id="module-search" type="search" placeholder="{t("site.search_placeholder")}" />
   </div>

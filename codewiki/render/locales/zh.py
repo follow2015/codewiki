@@ -40,6 +40,8 @@ CATALOG: dict[str, str] = {
     "wiki.back_to_index": "[← 返回索引](../{index})",
     "layer_map.root": "(根)",
     "layer_map.module_stats": "{modules} 模块 · {symbols} 符号",
+    "layer_map.module_count_only": "{modules} 模块",
+    "layer_map.io_stats": "出 {sent} · 入 {received}",
     "layer_map.cross_layer_top": "跨层引用 TOP {count}",
     "layer_map.no_cross_layer": "无跨层引用",
     "layer_map.more_flows": "… 还有 {count} 对",
