@@ -8,14 +8,23 @@
 * 分组后节点标签去掉层前缀和框名（框标题已经写明，重复三遍纯属噪声）；
 * 跨组的边聚合成一条、标次数；组内的边逐条画（"这个包里谁依赖谁"是细节）；
 * 目录太多时不分组（30 个目录各 1 个模块，框本身成了噪声）；
-* 层内图只画本层，不留其它层的空框。
+* 层内图只画本层，不留其它层的空框；
+* 同源同宿的平行 import 只画一条箭头（否则 ``import x`` + ``from x import y``
+  会画成两行一模一样的箭头，图注还把它们都算进"边"）；
+* 层图里的注解只留一句提示 —— 整段 AI 说明会把框撑高到超过尺寸阈值。
 """
 
 from __future__ import annotations
 
 from codewiki.models import Edge, EdgeType, Node, NodeType
 from codewiki.packetio import packet_from_parts
-from codewiki.render.mermaid_macro import MAX_DIR_GROUPS, node_id, render_layer_detail
+from codewiki.render.mermaid_macro import (
+    LAYER_NOTE_LIMIT,
+    MAX_DIR_GROUPS,
+    node_id,
+    render_layer_detail,
+)
+from codewiki.schemas import Annotation
 
 
 def _module(path: str, layer: str = "v1") -> Node:
@@ -26,14 +35,23 @@ def _edge(source: str, target: str, **kwargs) -> Edge:
     return Edge(source=f"mod::{source}", target=f"mod::{target}", type=EdgeType.IMPORTS, **kwargs)
 
 
-def _packet(nodes: list[Node], edges: list[Edge]):
+def _packet(nodes: list[Node], edges: list[Edge], annotations: list[Annotation] | None = None):
     return packet_from_parts(
-        title="t", layers=[{"id": "v1", "name": "v1", "order": 1}], nodes=nodes, edges=edges
+        title="t",
+        layers=[{"id": "v1", "name": "v1", "order": 1}],
+        nodes=nodes,
+        edges=edges,
+        annotations=annotations,
     )
 
 
-def _render(nodes: list[Node], edges: list[Edge]) -> str:
-    return render_layer_detail(_packet(nodes, edges), layer_name="v1", members=nodes, min_confidence=0.5)
+def _render(nodes: list[Node], edges: list[Edge], annotations: list[Annotation] | None = None) -> str:
+    return render_layer_detail(
+        _packet(nodes, edges, annotations),
+        layer_name="v1",
+        members=nodes,
+        min_confidence=0.5,
+    )
 
 
 def _boxes(text: str) -> list[str]:
@@ -119,6 +137,58 @@ def test_all_type_only_group_edges_keep_the_dashed_style():
     text = _render(nodes, [_edge("pkg/util/c.py", "pkg/core/a.py", type_only=True, static=False)])
 
     assert "仅类型 1" in text, f"仅类型的聚合边要带标签:\n{text}"
+
+
+def test_parallel_imports_draw_a_single_arrow():
+    """``import x`` 与 ``from x import y`` 是两条边，模块粒度上只有一条依赖。
+
+    旧归约把这样一对同时判成可删，重复行一直没露过面；改成缩点归约后 IPIP 实测
+    3 组画成两行一模一样的箭头。图注也不该把它们算成两条边。
+    """
+    nodes = [_module("pkg/core/a.py"), _module("pkg/core/b.py")]
+    edges = [
+        _edge("pkg/core/a.py", "pkg/core/b.py"),
+        _edge("pkg/core/a.py", "pkg/core/b.py", alias="b"),
+    ]
+    text = _render(nodes, edges)
+
+    a, b = node_id("mod::pkg/core/a.py"), node_id("mod::pkg/core/b.py")
+    assert text.count(f"{a} --> {b}") == 1, f"平行 import 只能画一条箭头:\n{text}"
+    assert "边 1 ·" in text, f"图注要按去重后的条数记:\n{text}"
+
+
+def test_parallel_imports_with_different_rendering_both_stay():
+    """渲染出来不一样的两条边（权重/仅类型）不能合并 —— 它们是真实差异。"""
+    nodes = [_module("pkg/core/a.py"), _module("pkg/core/b.py")]
+    edges = [
+        _edge("pkg/core/a.py", "pkg/core/b.py"),
+        _edge("pkg/core/a.py", "pkg/core/b.py", type_only=True),
+    ]
+    text = _render(nodes, edges)
+
+    a, b = node_id("mod::pkg/core/a.py"), node_id("mod::pkg/core/b.py")
+    assert f"{a} --> {b}" in text, text
+    assert "仅类型" in text, f"仅类型那条要保留:\n{text}"
+
+
+def test_long_annotation_is_clipped_in_layer_diagram():
+    """层图是鸟瞰图：整段 AI 说明会把框撑到超过尺寸阈值，只留一句提示。"""
+    nodes = [_module("pkg/core/a.py"), _module("pkg/util/c.py")]
+    note = "这个模块负责把请求转成内部调用，并在失败时回退到本地缓存。" * 5
+    text = _render(nodes, [], [Annotation(target="mod::pkg/core/a.py", note=note, source="ai")])
+
+    assert note not in text, f"完整注解不该进层图:\n{text}"
+    assert note[:LAYER_NOTE_LIMIT] in text, f"要留前 {LAYER_NOTE_LIMIT} 个字做提示:\n{text}"
+    assert "…" in text, f"截断要有省略号:\n{text}"
+
+
+def test_short_annotation_survives_intact():
+    """短注解本来就一屏放得下，不该被截。"""
+    nodes = [_module("pkg/core/a.py"), _module("pkg/util/c.py")]
+    text = _render(nodes, [], [Annotation(target="mod::pkg/core/a.py", note="下单主链路。", source="human")])
+
+    assert "下单主链路。" in text, text
+    assert "…" not in text, f"没超长就不该加省略号:\n{text}"
 
 
 __all__: list[str] = []

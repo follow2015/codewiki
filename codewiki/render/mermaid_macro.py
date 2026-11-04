@@ -101,13 +101,26 @@ def escape_label(text: str) -> str:
     )
 
 
-def _annotation_label(packet: DataPacket, target: str, base: str) -> str:
-    """把人工/AI 注解拼进 Label（多行用 ``<br/>``，§4.2.1 第 3 步）。"""
+LAYER_NOTE_LIMIT = 40
+
+
+def _annotation_label(packet: DataPacket, target: str, base: str, *, limit: int | None = None) -> str:
+    """把人工/AI 注解拼进 Label（多行用 ``<br/>``，§4.2.1 第 3 步）。
+
+    ``limit`` 按**字符**截断注解（先截原串再转义，免得把 ``#40;`` 这类转义序列
+    切一半）。省略号用 ``…``，不进 i18n 目录：它是标点，没有语言差异。
+    """
     notes = [a for a in packet.annotations if a.target == target and a.note]
     if not notes:
         return base
-    extra = "<br/>".join(escape_label(a.note) for a in notes)
+    extra = "<br/>".join(escape_label(_clip_note(a.note, limit)) for a in notes)
     return f"{base}<br/>{extra}"
+
+
+def _clip_note(note: str, limit: int | None) -> str:
+    if limit is None or len(note) <= limit:
+        return note
+    return note[:limit].rstrip() + "…"
 
 
 STATS_STYLE = "fill:#f6f6f6,stroke:#d0d0d0,color:#666,font-size:12px"
@@ -156,7 +169,9 @@ def render_system_context(
     if not layers:
         plan = _plan_module_edges(packet, min_confidence, subset={m.id for m in modules})
         for module in sorted(modules, key=lambda m: m.path or ""):
-            lines.append(f'  {node_id(module.id)}["{_module_label(packet, module, plan.hubs)}"]')
+            lines.append(
+                f'  {node_id(module.id)}["{_module_label(packet, module, plan.hubs, note_limit=LAYER_NOTE_LIMIT)}"]'
+            )
         lines.extend(emit_edges(plan.entries))
         lines.extend(_stats_lines(len(modules), len(plan.entries), plan.raw - len(plan.entries)))
         return "\n".join(lines) + "\n"
@@ -170,14 +185,18 @@ def render_system_context(
         lines.append(f'  subgraph {node_id(layer.id)}["{escape_label(layer.name)}"]')
         members = [m for m in modules if m.layer_id == layer.id]
         for module in _sorted_by_weight(packet, members):
-            lines.append(f'    {node_id(module.id)}["{_module_label(packet, module, plan.hubs)}"]')
+            lines.append(
+                f'    {node_id(module.id)}["{_module_label(packet, module, plan.hubs, note_limit=LAYER_NOTE_LIMIT)}"]'
+            )
         lines.append("  end")
 
     unlayered = [m for m in modules if not m.layer_id or m.layer_id == UNLAYERED_LAYER_ID]
     if unlayered:
         lines.append(f'  subgraph {node_id(UNLAYERED_LAYER_ID)}["{t(UNLAYERED_LABEL)}"]')
         for module in _sorted_by_weight(packet, unlayered):
-            lines.append(f'    {node_id(module.id)}["{_module_label(packet, module, plan.hubs)}"]')
+            lines.append(
+                f'    {node_id(module.id)}["{_module_label(packet, module, plan.hubs, note_limit=LAYER_NOTE_LIMIT)}"]'
+            )
         lines.append("  end")
 
     chain_ids = [layer.id for layer in layers]
@@ -307,7 +326,7 @@ def _plan_module_edges(packet: DataPacket, min_confidence: float, *, subset: set
     小图不降噪是有意的：`A → C` 与 `A → B → C` 在依赖图里是两条不同的声明，
     小图上省掉它只会让读者以为没有直接依赖。
     """
-    candidates = _module_edges(packet, min_confidence, subset=subset)
+    candidates = _distinct_module_edges(_module_edges(packet, min_confidence, subset=subset))
     if len(candidates) <= MAX_VISIBLE_EDGES:
         return EdgePlan(
             [_module_entry(edge) for edge in candidates], edges=list(candidates), raw=len(candidates)
@@ -317,6 +336,29 @@ def _plan_module_edges(packet: DataPacket, min_confidence: float, *, subset: set
     kept, trimmed = _transitive_reduce(candidates)
     kept = [edge for edge in kept if edge.target not in hubs]
     return EdgePlan([_module_entry(edge) for edge in kept], hubs, trimmed, edges=kept, raw=len(candidates))
+
+
+def _distinct_module_edges(edges: list) -> list:
+    """同一对模块之间的平行 IMPORTS 合成一条。
+
+    ``import x`` 与 ``from x import y`` 并存时，builder 会留下两条
+    ``(source, target, IMPORTS)``，只有 ``alias`` 不同 —— 在模块粒度上它们是同一条
+    依赖。旧归约恰好把这样一对同时判成可删，重复行就一直没露过面；改成缩点归约后
+    IPIP 实测有 3 组画成两行一模一样的箭头，图注还把它们算进"边"。
+
+    去重键取**渲染后的行文本 + 样式**，而不是端点对：权重/置信度/动态边会渲染成
+    不同的行（``-->|2|``、``-.->``），那些是真实差异，必须留。
+    """
+    seen: set[tuple[str, tuple[str, ...]]] = set()
+    out = []
+    for edge in edges:
+        entry = _module_entry(edge)
+        key = (entry.text, entry.styles)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(edge)
+    return out
 
 
 def _hub_counts(edges: list, *, module_count: int) -> dict[str, int]:
@@ -399,11 +441,20 @@ def _module_entry(edge) -> EdgeLine:
     return EdgeLine(f"  {node_id(edge.source)} {arrow}{label} {node_id(edge.target)}", tuple(styles))
 
 
-def _module_label(packet: DataPacket, module, hubs: dict[str, int], *, display: str | None = None) -> str:
+def _module_label(
+    packet: DataPacket,
+    module,
+    hubs: dict[str, int],
+    *,
+    display: str | None = None,
+    note_limit: int | None = None,
+) -> str:
     """模块节点标签：路径 +（枢纽时）徽标 + 人工注解。
 
     ``display`` 用于层内图：整个层都在 ``v1/`` 下时，每个节点再重复一遍 ``v1/``
     只是噪声（层名在页面标题和框标题里已经有了）。
+
+    ``note_limit`` 只在层图上传：鸟瞰图要一屏看清结构，整段注解留给模块页。
 
     徽标前的空格由这里补：i18n 目录禁止值首尾带空白（``test_no_empty_or_padded_entries``），
     而 ``errors.py· 被 12 个模块使用`` 挤在一起读不断句。
@@ -412,7 +463,7 @@ def _module_label(packet: DataPacket, module, hubs: dict[str, int], *, display: 
     count = hubs.get(module.id)
     if count:
         label += " " + escape_label(t("diagrams.hub_badge", count=count))
-    return _annotation_label(packet, module.id, label)
+    return _annotation_label(packet, module.id, label, limit=note_limit)
 
 
 def _sorted_by_weight(packet: DataPacket, members: list) -> list:
@@ -498,7 +549,9 @@ def render_layer_detail(
             lines.append(f'  subgraph {node_id(f"dir::{layer_name}::{key}")}["{label}"]')
         indent = "    " if grouped else "  "
         for module in _sorted_by_weight(packet, mods):
-            text = _module_label(packet, module, plan.hubs, display=_shown(module))
+            text = _module_label(
+                packet, module, plan.hubs, display=_shown(module), note_limit=LAYER_NOTE_LIMIT
+            )
             lines.append(f'{indent}{node_id(module.id)}["{text}"]')
         if grouped:
             lines.append("  end")
