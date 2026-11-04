@@ -268,7 +268,13 @@ def test_out_writes_an_external_config_path(tmp_path):
 
 
 def test_no_auto_exclude_keeps_every_directory(tmp_path):
-    """自动排除是**默认**不是**强制**：判断错了要能一键关掉。"""
+    """自动排除是**默认**不是**强制**：判断错了要能一键关掉。
+
+    断言落在**扫描结果**而不是层 paths：``tests/`` 只有 1 个模块，会被收进零散桶、
+    有意不写进层配置。用层 paths 验证会把"没被排除"和"成了层"混成同一件事。
+    """
+    from codewiki.cli.init_cmd import _scan
+
     repo = tmp_path / "repo"
     _write_repo(repo)
     _write_structure_noise(repo)
@@ -276,8 +282,8 @@ def test_no_auto_exclude_keeps_every_directory(tmp_path):
     assert main(["init", "--src", str(repo), "--path", str(tmp_path), "--no-auto-exclude"]) == 0
     cfg = load_config(tmp_path / "codewiki.toml")
     assert "tests" not in (cfg.analysis.exclude or [])
-    counted = [path for layer in cfg.architecture.layers for path in layer.paths]
-    assert any("tests" in path for path in counted), counted
+    paths, *_ = _scan(repo, backend="auto", excludes=tuple(cfg.analysis.exclude or ()))
+    assert any(path.startswith("tests/") for path in paths), paths
 
 
 def test_languages_whitelist_skips_other_languages(tmp_path):

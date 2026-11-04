@@ -79,14 +79,112 @@ class _FailingClient:
         raise LLMError("connection refused")
 
 
-def test_directory_draft_covers_every_module_without_unlayered():
-    """起草配置的第一职责：**每个模块都有层**，否则接上 analyze 就是一片警告。"""
+def test_directory_draft_covers_every_directory_module():
+    """起草配置的第一职责：**有职责的模块都有层**。
+
+    组合根（仓库根的装配/入口）是唯一例外 —— 见下一条：给它们一层必然产出假环。
+    """
     paths = _app_paths()
     draft = directory_draft(paths)
     pairs = [(layer.id, layer.paths) for layer in draft.layers]
 
     uncovered = [p for p in paths if layer_of(p, pairs) == UNLAYERED_LAYER_ID]
-    assert uncovered == []
+    assert uncovered == ["run.py", "wsgi.py"]
+    assert sorted(draft.entry_modules) == ["run.py", "wsgi.py"]
+
+
+def test_entry_modules_do_not_become_a_layer():
+    """仓库根的装配/入口**不成层**：它跟每一层都互相依赖，必然报假 LAYER_CYCLE。
+
+    实测 ipip（670 模块）：``root``(6 个根文件) / ``app``(2) / ``other``(2) 三个碎层
+    凑出 3 条 ``app → root → app`` 形态的 error；手写配置把这 10 个归未分层就没有。
+    这些模块没有共同的职责，只是"恰好放在根目录"，一层包住它们是目录清单不是分层。
+    """
+    draft = directory_draft(_app_paths(), deps=_deps())
+    assert "root" not in {layer.name for layer in draft.layers}
+
+
+def test_merged_singleton_bucket_is_not_written_as_a_layer():
+    """``other`` 合并桶没有职责含义 —— 写进配置等于把"杂项"当成一层。
+
+    它同样会跟所有层互依（桶里的模块散布在各个目录），是假环的另一个来源。
+    """
+    paths = [*_app_paths(), "lonely/x.py", "odd/y.py"]
+    draft = directory_draft(paths)
+    names = {layer.name for layer in draft.layers}
+    assert not [n for n in names if n.startswith("other")], names
+    assert {"lonely/x.py", "odd/y.py"} <= set(draft.entry_modules)
+
+
+def test_real_other_directory_still_gets_a_layer():
+    """**不能按名字过滤**：仓库里真有个 ``other/`` 目录时，它和合成桶同名但性质不同。
+
+    合成桶由多个不相干前缀拼成；真实目录的模块全在同一个前缀下。
+    """
+    paths = [*(f"app/api/m{i}.py" for i in range(6)), *(f"other/m{i}.py" for i in range(3)), "lonely/x.py"]
+    draft = directory_draft(paths)
+    by_name = {layer.name: layer for layer in draft.layers}
+
+    assert by_name["other"].paths == ["other"]
+    assert "other-2" not in by_name
+    assert "lonely/x.py" in draft.entry_modules
+
+
+def test_module_caught_by_a_prefix_layer_is_not_reported_as_assembly():
+    """``app`` 层（paths=["app"]）会把 ``app/config`` 一并兜住 —— 不能同时说它未归层。
+
+    这条在 ipip 上真实出现：合成桶收了 ``app/config/__init__.py`` 与
+    ``app/infra/__init__.py``，而 ``app`` 层的前缀匹配把两者都覆盖了。文案里多报
+    2 个不存在的遗漏，人只能去追一个查不出来的问题。
+    """
+    paths = [
+        "app/__init__.py",
+        "app/celery_app.py",
+        *(f"app/api/m{i}.py" for i in range(6)),
+        "app/config/__init__.py",
+        "run.py",
+    ]
+    draft = directory_draft(paths)
+
+    assert "app" in {layer.name for layer in draft.layers}
+    assert "app/config/__init__.py" not in draft.entry_modules
+    assert draft.entry_modules == ["run.py"]
+
+
+def test_tiny_repo_falls_back_to_the_bucket_instead_of_no_layers():
+    """3 个模块分居 3 个目录：过滤掉零散桶就一层不剩，那时退回它。
+
+    一层都没有的配置对 analyze 毫无价值（全归未分层，连分层视图都没有），而
+    "组合根 vs 杂项"的区分在 3 个模块的仓库里本来就没有意义。平铺仓库另有出路
+    （见下一条）：一个层包住全部不提供任何信息。
+    """
+    paths = ["app/api/h.py", "app/svc/l.py", "app/m/r.py"]
+    draft = directory_draft(paths)
+
+    assert [layer.name for layer in draft.layers] == ["other"]
+    assert draft.entry_modules == []
+
+
+def test_repo_of_only_entry_files_yields_no_layers():
+    """全是根文件（平铺仓库）时起草不出层 —— 交给调用方退回模板。"""
+    assert directory_draft(["run.py", "wsgi.py", "config.py"]).layers == []
+
+
+def test_coverage_ignores_modules_that_are_intentionally_unlayered():
+    """组合根不算"漏了"：一份正确的配置不该显示成 97% 覆盖。
+
+    分母含 ``entry_modules`` 时，``_app_paths()`` 的覆盖率会变成 30/32 —— 人对着
+    这个数字只会去追两个不存在的遗漏。
+    """
+    draft = directory_draft(_app_paths(), deps=_deps())
+    assert draft.coverage == 1.0
+
+
+def test_notes_explain_why_entry_modules_are_left_unlayered():
+    """不归层要说明白：否则人只看到"未归层 2 个"，会以为是工具漏了。"""
+    notes = directory_draft(_app_paths()).render_notes()
+    assert "组合根" in notes
+    assert "run.py" in notes
 
 
 def test_directory_draft_does_not_fragment_into_single_module_layers():
@@ -358,11 +456,12 @@ def test_hint_survives_between_unrelated_siblings():
     assert [(hint.a, hint.b) for hint in draft.hints] == [("repo", "svc")]
 
 
-def test_single_module_groups_are_merged_into_other():
-    """下钻出来的单模块组要并进 ``other``（``min_group`` 只管顶层，管不到下钻）。
+def test_single_module_groups_are_not_given_their_own_layer():
+    """下钻出来的单模块组既不单独成层，也不该跟别的零散目录凑成一个 ``other`` 层。
 
     实测 ipip arch-e0：``app/infra`` 只有 1 个模块，却独占一层 —— 一层一个模块不是
-    分层，是目录清单。
+    分层，是目录清单。而把它们打包成 ``other`` 是另一个极端：那个桶没有职责含义，
+    跟每层互依，只会换来一条假 LAYER_CYCLE。
     """
     paths = [
         *(f"app/api/m{i}.py" for i in range(6)),
@@ -372,11 +471,13 @@ def test_single_module_groups_are_merged_into_other():
     ]
     draft = directory_draft(paths)
     names = {layer.name for layer in draft.layers}
+
     assert "app.infra" not in names
-    assert all(layer.modules >= 2 for layer in draft.layers if not layer.name.startswith("other")), [
+    assert not [name for name in names if name.startswith("other")], names
+    assert "app/infra/only.py" in draft.entry_modules
+    assert all(layer.modules >= 2 for layer in draft.layers), [
         (layer.name, layer.modules) for layer in draft.layers
     ]
-    assert any(layer.name.startswith("other") for layer in draft.layers)
 
 
 def test_oversized_group_is_split_only_past_half_the_repo():

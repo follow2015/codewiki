@@ -113,6 +113,22 @@
 
 ### 变更
 
+- **`init --src` 不再把仓库根的装配/入口写成一层**（合成组不进配置）。ipip 实测：
+  自动起草的 18 层里混着 `root`（6 个根文件）/ `app`（2 个）/ `other`（2 个）三个碎层，
+  它们被所有层引用、自己也引用别的层，于是 analyze 报 3 条 `app → root → app` 形态的
+  `LAYER_CYCLE`（error）—— 这与架构好坏无关，纯粹是「组合根不该当层」。现在
+  `directory_draft` 过滤由目录结构**凑**出来的组（仓库根散落文件、零散小目录的合并桶），
+  这些模块归入未分层：analyze 报 `UNLAYERED_MODULE`（warning，提示性），init 的输出里
+  也会写明「未归层的装配/入口模块（组合根，N 个）」及原因。
+  - 过滤按**事实**不按名字：`DirGroup` 新增 `synthetic`，由 `directory_groups` 与
+    `_merge_singletons` 标出。仓库里真有个 `other/` 目录时它照常成层，不会被误伤。
+  - 合成组的模块未必真的没层：`app` 这种前缀层会把 `app/config` 一并兜住。`entry_modules`
+    与提示文案都按**最终归属**再筛一遍，避免报出"未归层 8 个"而其中 2 个其实有层。
+  - 兜底：过滤后一层不剩（3 个模块分居 3 个目录）时退回那一层 —— 空配置对 analyze
+    毫无价值；全是根文件的平铺仓库仍按 `derive_layer_specs` 的口径返回空层。
+  - ipip 结果：18 层 → 15 层；error 从「3 条假环 + 1 条环太大」变成 4 条**真实**环
+    （`app.core / app.exceptions / app.utils` 与 `app.persistence / app.schemas /
+    app.services` 两组），而 init 在起草阶段就把这两组点出来建议合并。
 - **超长签名默认截断到 6 行，悬停或点击展开全文**（纯呈现层）。IPIP 里动辄十几个
   参数的签名能把一行撑到 12 行，一屏装不下三个符号。现在签名格用 CSS `line-clamp`
   收在 6 行（自带省略号、收在行边界，不会把一行劈成两半）。展开有两条路：

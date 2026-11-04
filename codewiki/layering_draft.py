@@ -85,16 +85,23 @@ class DraftResult:
     hints: list[CrossDirHint] = field(default_factory=list)
     diagnostics: list[Diagnostic] = field(default_factory=list)
     uncovered: list[str] = field(default_factory=list)
+    entry_modules: list[str] = field(default_factory=list)
     cycles: list[list[str]] = field(default_factory=list)
     source: str = "directory"
     raw_reply: str = ""
 
     @property
     def coverage(self) -> float:
-        total = len(self.uncovered) + sum(layer.modules for layer in self.layers)
+        """已归层模块占**该归层**模块的比例。
+
+        分母不算 ``entry_modules``：那些模块是有意不归层的（组合根），把它们算进
+        "漏了"会让一份正确的配置显示成 98% 覆盖，人只能去追一个不存在的遗漏。
+        """
+        covered = sum(layer.modules for layer in self.layers)
+        total = covered + len(self.uncovered)
         if total == 0:
             return 1.0
-        return sum(layer.modules for layer in self.layers) / total
+        return covered / total
 
     def has_code(self, code: str) -> bool:
         return any(d.code == code for d in self.diagnostics)
@@ -125,6 +132,14 @@ class DraftResult:
                     f"{hint.a} -> {hint.b} {hint.ab} 条、{hint.b} -> {hint.a} {hint.ba} 条"
                 )
             lines.append("  ⇒ 若它们其实是同一层，把两者的 paths 合并到一层即可。")
+        if self.entry_modules:
+            shown = ", ".join(self.entry_modules[:4])
+            more = f" 等 {len(self.entry_modules)} 个" if len(self.entry_modules) > 4 else ""
+            lines.append(f"未归层的装配/入口模块（组合根，{len(self.entry_modules)} 个）：{shown}{more}")
+            lines.append(
+                "  ⇒ 这是有意为之：它们跟每一层都互相依赖，单独设层会报假的 LAYER_CYCLE。"
+                "要纳入分层就手动加一层，并接受那条边界。"
+            )
         if self.uncovered:
             shown = ", ".join(self.uncovered[:6])
             more = f" 等 {len(self.uncovered)} 个" if len(self.uncovered) > 6 else ""
@@ -309,11 +324,13 @@ def layer_cycles(
 
 
 def _merge_singletons(groups: list) -> list:  # noqa: ANN001 - list[DirGroup]
-    """把只剩 1 个模块的组并进 ``other``。
+    """把只剩 1 个模块的组收进一个 ``other`` 桶。
 
     ``directory_groups`` 的 ``min_group`` 只作用于**顶层**分组；``_descend_oversized``
     下钻出来的小组不受它约束，于是一个只含单个文件的包会独占一层（实测
     ``app.infra`` 1 个模块）。一层一个模块不是分层，是目录清单。
+
+    收进来的桶标 ``synthetic``：它同样不该写进层配置（见 :func:`directory_draft`）。
     """
     if len(groups) < 2:
         return groups
@@ -328,7 +345,7 @@ def _merge_singletons(groups: list) -> list:  # noqa: ANN001 - list[DirGroup]
         for prefix in group.prefixes or group.modules:
             if prefix not in prefixes:
                 prefixes.append(prefix)
-    return [*keep, DirGroup(name=OTHER_GROUP_NAME, prefixes=prefixes, modules=modules)]
+    return [*keep, DirGroup(name=OTHER_GROUP_NAME, prefixes=prefixes, modules=modules, synthetic=True)]
 
 
 def directory_draft(
@@ -349,7 +366,13 @@ def directory_draft(
         paths, max_depth=3, min_group=2, max_group=max_group or _coarse_max_group(len(paths))
     )
     groups = _merge_singletons(groups)
-    names = unique_names(group.name for group in groups)
+
+    kept = [group for group in groups if not group.synthetic]
+    synthetic = sorted(module for group in groups if group.synthetic for module in group.modules)
+    if not kept and any(group.prefixes for group in groups):
+        kept = list(groups)
+        synthetic = []
+    names = unique_names(group.name for group in kept)
     layers = [
         LayerDraft(
             name=name,
@@ -357,18 +380,22 @@ def directory_draft(
             modules=len(group.modules),
             source="directory",
         )
-        for name, group in zip(names, groups, strict=True)
+        for name, group in zip(names, kept, strict=True)
     ]
 
     layers, _cyclic = order_draft_layers(layers, paths, deps)
     layers = finalize_counts(layers, paths)
     pairs = [(layer.id, layer.paths) for layer in layers]
-    uncovered = [path for path in paths if layer_of(path, pairs) == "layer::_unlayered"]
+
+    uncovered_set = {path for path in paths if layer_of(path, pairs) == "layer::_unlayered"}
+    entry_modules = [module for module in synthetic if module in uncovered_set]
+    uncovered = [path for path in paths if path not in set(entry_modules) and path in uncovered_set]
 
     return DraftResult(
         layers=layers,
         hints=cross_dir_hints(paths, deps),
         uncovered=uncovered,
+        entry_modules=entry_modules,
         cycles=layer_cycles(layers, paths, deps),
         source="directory",
     )

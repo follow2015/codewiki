@@ -69,6 +69,7 @@ class DirGroup:
     name: str
     prefixes: list[str]
     modules: list[str] = field(default_factory=list)
+    synthetic: bool = False
 
 
 def unique_names(names: Iterable[str], *, reserved: Iterable[str] = RESERVED_GROUP_NAMES) -> list[str]:
@@ -189,11 +190,12 @@ def directory_groups(
     big = {prefix: members for prefix, members in groups.items() if len(members) >= min_group or prefix == ""}
     small = {prefix: members for prefix, members in groups.items() if prefix not in big}
     result = [
-        DirGroup(_group_name(prefix), [prefix] if prefix else [], members) for prefix, members in big.items()
+        DirGroup(_group_name(prefix), [prefix] if prefix else [], members, synthetic=not prefix)
+        for prefix, members in big.items()
     ]
     if len(small) >= 2:
         merged = sorted(m for members in small.values() for m in members)
-        result.append(DirGroup(OTHER_GROUP_NAME, sorted(small), merged))
+        result.append(DirGroup(OTHER_GROUP_NAME, sorted(small), merged, synthetic=True))
     else:
         result.extend(DirGroup(_group_name(prefix), [prefix], members) for prefix, members in small.items())
     result.sort(key=lambda g: (-len(g.modules), g.name))
