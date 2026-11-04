@@ -8,6 +8,8 @@
 
 from __future__ import annotations
 
+import re
+
 from codewiki.graph.index import GraphIndex
 from codewiki.models import NodeType
 from codewiki.render.diagrams import _slug, build_slug_map
@@ -16,6 +18,30 @@ from codewiki.schemas import DataPacket
 
 MODULES_SUBDIR = "modules"
 INDEX_FILENAME = "index.md"
+
+_DOC_SECTION_RE = re.compile(
+    r"^(?:args|arguments|parameters|params|returns?|yields?|raises?|"
+    r"attributes?|examples?|notes?|usage|todo)\s*:\s*$",
+    re.IGNORECASE,
+)
+_DOC_FIELD_RE = re.compile(r"^:(?:param|type|arg|keyword|return|returns|rtype|raise|raises)\b")
+_DOC_ROLE_RE = re.compile(r":(?:class|func|meth|attr|mod|ref|obj|exc|data|const|py:[\w.]+):")
+
+
+def _doc_summary(docstring: str | None) -> str:
+    """docstring 的摘要行（第一段首行）；没有摘要就返回空串。
+
+    空串在下游是「没有说明」，页面上是一个极淡的占位符 —— 比印一个
+    ``Args:`` 或者截断到半个参数列表要诚实。
+    """
+    for raw in (docstring or "").splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        if _DOC_SECTION_RE.match(line) or _DOC_FIELD_RE.match(line):
+            return ""
+        return _DOC_ROLE_RE.sub("", line)
+    return ""
 
 
 def _packet_slug_map(packet: DataPacket) -> dict[str, str]:
@@ -134,10 +160,11 @@ def render_module_page(
         lines.append(t("wiki.symbol_header"))
         lines.append("| --- | --- | --- | --- | --- |")
         for symbol in symbols:
+            name = symbol.name.replace("|", "\\|")
             signature = (symbol.signature or "").replace("|", "\\|")
-            doc = (symbol.docstring or "").splitlines()[0] if symbol.docstring else ""
-            doc = doc.replace("|", "\\|")
-            lines.append(f"| `{symbol.name}` | {symbol.kind} | {symbol.line_start} | `{signature}` | {doc} |")
+            doc = _doc_summary(symbol.docstring).replace("|", "\\|").strip()
+            sig_cell = f"`{signature}`" if signature.strip() else ""
+            lines.append(f"| `{name}` | {symbol.kind} | {symbol.line_start} | {sig_cell} | {doc} |")
         lines.append("")
 
     upstream_map, downstream_map = idx.neighbors(module_id)

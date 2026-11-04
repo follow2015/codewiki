@@ -612,3 +612,149 @@ def test_module_pages_carry_diagram_interactions(mini_py):
     assert 'document.addEventListener("mouseover"' in html, "必须用 document 级事件委托"
     index = render_index_html(_packet(mini_py))
     assert "pre.mermaid" not in index or "diagramOf" not in index, "index 没有 mermaid 图，别注入交互脚本"
+
+
+def _packet_with_symbols(symbols):
+    from codewiki.models import FileModel
+
+    files = [FileModel(path="pkg/a.py", language="python", hash="h", symbols=symbols, imports=[], calls=[])]
+    result = build_graph(files)
+    return packet_from_parts(
+        title="t",
+        layers=[],
+        nodes=result.nodes,
+        edges=result.edges,
+        annotations=[],
+        diagnostics=result.diagnostics,
+    )
+
+
+def _symbol(name, kind="function", signature=None, doc=None, line=1):
+    from codewiki.models import SymbolFact
+
+    return SymbolFact(
+        name=name,
+        qualname=name,
+        kind=kind,
+        lineno=line,
+        endlineno=line,
+        signature=signature,
+        docstring=doc,
+    )
+
+
+def test_symbol_table_keeps_union_types_in_their_own_cell():
+    """``str | None`` 必须留在签名格里，不能把一行切成两行两列。"""
+    import re
+
+    from codewiki.render.site import md_to_html
+
+    packet = _packet_with_symbols(
+        [_symbol("find", signature="(self, ip: str) -> SwitchNode | None", doc="给定 IP 返回交换机。")]
+    )
+    md = render_module_page(packet, "mod::pkg/a.py", diagram_text=None)
+    html = md_to_html(md)
+
+    row = re.search(r"<tr>(?:(?!</tr>).)*find(?:(?!</tr>).)*</tr>", html, re.S).group(0)
+    assert row.count("<td>") == 5, f"整行应当是 5 格，实际 {row.count('<td>')}: {row}"
+    assert "<code>(self, ip: str) -&gt; SwitchNode | None</code>" in row
+    assert "\\" not in row, f"转义符不该漏到页面上: {row}"
+
+
+def test_symbol_table_row_overflow_is_merged_not_spilled():
+    """列数异常时并进末列 —— 从前多出来的两格会撑出第三列、把表格撑破。"""
+    import re
+
+    from codewiki.render.site import md_to_html
+
+    md = "| 名称 | 类型 | 行 | 签名 | 说明 |\n| --- | --- | --- | --- | --- |\n| `a` | function | 1 | `() -> int` | 说明甲 | 说明乙 |\n"
+    html = md_to_html(md)
+
+    row = re.search(r"<tr>(?:(?!</tr>).)*<td>(?:(?!</tr>).)*</tr>", html, re.S).group(0)
+    assert row.count("<td>") == 5, row
+    assert "说明乙" in row, "溢出内容不能丢"
+
+
+def test_empty_signature_renders_no_bare_backticks():
+    """常量没有签名：留空单元格，不写 ```` `` ````（页面上是两个裸露的反引号）。
+
+    IPIP 实测 9025 个符号行里有 2337 行是这么显示签名的。
+    """
+    from codewiki.render.site import md_to_html
+
+    packet = _packet_with_symbols([_symbol("LIMIT", kind="constant", line=3)])
+    md = render_module_page(packet, "mod::pkg/a.py", diagram_text=None)
+    html = md_to_html(md)
+
+    assert "``" not in html, f"空签名还在写双双反引号:\n{md}"
+    assert "<td></td>" in html
+
+
+def test_symbol_table_gets_fixed_column_widths():
+    """符号表按固定列宽排版：长签名只在自己那列换行，说明列不被挤成竖缝。"""
+    from codewiki.render.site import md_to_html
+
+    md = "| 名称 | 类型 | 行 | 签名 | 说明 |\n| --- | --- | --- | --- | --- |\n| `a` | function | 1 | `()` | x |\n"
+    html = md_to_html(md)
+
+    assert '<table class="sym">' in html and "table.sym { table-layout: fixed" in render_module_html(
+        md, title="t"
+    )
+
+
+def test_docstring_double_backtick_code_spans_render_as_code():
+    """reST 风格的 ``` ``literal`` ``` 要渲染成 ``<code>``，不能留两条裸反引号。
+
+    说明栏直接取 docstring 首行，而本仓 docstring 满篇 ``` ``...`` ```
+    （``_strip_fence`` 的那条就是）。只认单反引号的旧规则会把中间那一对
+    当成围栏，页面上剩下两条裸露的反引号。
+    """
+    from codewiki.render.site import md_to_html
+
+    md = (
+        "| 名称 | 类型 | 行 | 签名 | 说明 |\n| --- | --- | --- | --- | --- |\n"
+        "| `a` | function | 1 | `()` | 剥离 ``json`` 围栏。 |\n"
+    )
+    html = md_to_html(md)
+
+    assert "``" not in html, html
+    assert "<code>json</code>" in html
+
+
+def test_code_span_content_is_literal():
+    """反引号里的字符是字面量：``**kw`` 不能被粗体规则吃掉。"""
+    from codewiki.render.site import md_to_html
+
+    md = (
+        "| 名称 | 类型 | 行 | 签名 | 说明 |\n| --- | --- | --- | --- | --- |\n"
+        "| `a` | function | 1 | `(self, **kw)` | 透传。 |\n"
+    )
+    html = md_to_html(md)
+
+    assert "<code>(self, **kw)</code>" in html, html
+    assert "<strong>" not in html
+
+
+def test_doc_summary_drops_section_headers_and_rest_roles():
+    """说明栏取的是 docstring 摘要，不是「Args:」也不是 ``:meth:`` 前缀。
+
+    实测 8 个模块页的说明栏只有一句 ``Args:``（docstring 首行就是字段列表的
+    小标题），另有 12 处 ``:meth:`notify``` 把 sphinx 角色名原样印了出来。
+    """
+    from codewiki.render.wiki import _doc_summary
+
+    assert _doc_summary("Args:\n    user_id (int): 用户 id") == ""
+    assert _doc_summary(":param x: 参数") == ""
+    assert _doc_summary("\n\n真正的摘要。\n\nArgs:") == "真正的摘要。"
+    assert _doc_summary("与 :meth:`notify` 完全相同。") == "与 `notify` 完全相同。"
+    assert _doc_summary(None) == "" and _doc_summary("   ") == ""
+
+
+def test_symbol_table_uses_docstring_summary_not_field_list():
+    from codewiki.render.site import md_to_html
+
+    packet = _packet_with_symbols([_symbol("run", signature="() -> None", doc="Args:\n    x (int): 数量。")])
+    md = render_module_page(packet, "mod::pkg/a.py", diagram_text=None)
+    html = md_to_html(md)
+
+    assert "Args:" not in html, md

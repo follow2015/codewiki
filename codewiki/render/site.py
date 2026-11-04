@@ -33,7 +33,8 @@ PACKAGE_ASSET = Path(__file__).resolve().parent.parent / "assets" / "mermaid.min
 _FENCE_RE = re.compile(r"^```(\w*)\s*$")
 _TABLE_SEP_RE = re.compile(r"^\|(\s*:?-{3,}:?\s*\|)+$")
 _LINK_RE = re.compile(r"\[([^\]]+)\]\(([^)\s]+)\)")
-_CODE_RE = re.compile(r"`([^`]+)`")
+_CODE_RE = re.compile(r"(`+)(.+?)\1")
+_SYMBOL_COLS = 5
 _BOLD_RE = re.compile(r"\*\*([^*]+)\*\*")
 _HEADING_RE = re.compile(r"^(#{1,4})\s+(.*)$")
 _LIST_RE = re.compile(r"^(\s*)-\s+(.*)$")
@@ -59,10 +60,57 @@ def _card_path(path: str) -> str:
 
 
 def _inline(text: str) -> str:
+    """行内规则：code / 链接 / 粗体。
+
+    code span 先抽出来换成占位符 —— **代码里的字符是字面量**，不该再被粗体或
+    链接规则改写。签名里写 ``**kwargs`` 时若让粗体先跑，``**`` 会成对匹配到
+    别处，把签名咬出半个 ``<strong>``。
+    """
+    spans: list[str] = []
+
+    def stash(match: re.Match[str]) -> str:
+        spans.append(match.group(2))
+        return f"\x00{len(spans) - 1}\x00"
+
+    text = _CODE_RE.sub(stash, text)
     text = _LINK_RE.sub(lambda m: f'<a href="{_href(m.group(2))}">{m.group(1)}</a>', text)
     text = _BOLD_RE.sub(r"<strong>\1</strong>", text)
-    text = _CODE_RE.sub(r"<code>\1</code>", text)
+    for i, span in enumerate(spans):
+        text = text.replace(f"\x00{i}\x00", f"<code>{span}</code>")
     return text
+
+
+def _split_table_row(line: str) -> list[str]:
+    """按**未转义**的竖线切单元格，并把 ``\\|`` 还原成 ``|``。
+
+    自家生成器把单元格里的 ``|`` 写成 ``\\|``（GFM 的表格转义）——签名里的
+    联合类型 ``str | None`` 全走这条路。早先直接 ``line.split("|")``，于是
+    每遇到一个 ``| None`` 就把一行切碎：多出的半个签名被当成下一列，整行
+    右移，「说明」被挤到表格外面。410 行受影响。
+    """
+    body = line.strip()
+    if body.startswith("|"):
+        body = body[1:]
+    cells: list[str] = []
+    buf: list[str] = []
+    i = 0
+    while i < len(body):
+        ch = body[i]
+        if ch == "\\" and i + 1 < len(body) and body[i + 1] == "|":
+            buf.append("|")
+            i += 2
+            continue
+        if ch == "|":
+            cells.append("".join(buf).strip())
+            buf = []
+            i += 1
+            continue
+        buf.append(ch)
+        i += 1
+    tail = "".join(buf).strip()
+    if tail or not body.rstrip().endswith("|"):
+        cells.append(tail)
+    return cells
 
 
 def md_to_html(md: str) -> str:
@@ -120,21 +168,25 @@ def md_to_html(md: str) -> str:
             rows: list[list[str]] = []
             while i < len(lines) and lines[i].startswith("|"):
                 if not _TABLE_SEP_RE.match(lines[i]):
-                    cells = [c.strip() for c in lines[i].strip().strip("|").split("|")]
+                    cells = _split_table_row(lines[i])
                     rows.append([_inline(escape_text(c)) for c in cells])
                 i += 1
             if rows:
                 head, *body_rows = rows
-                parts = ["<table>", "<thead>", "<tr>"]
+                cls = ' class="sym"' if len(head) == _SYMBOL_COLS else ""
+                parts = [f"<table{cls}>", "<thead>", "<tr>"]
                 parts += [f"<th>{c}</th>" for c in head]
                 parts += ["</tr></thead>"]
                 if body_rows:
                     parts.append("<tbody>")
                     for r in body_rows:
+                        if len(r) > len(head):
+                            r = r[: len(head) - 1] + [" | ".join(r[len(head) - 1 :])]
+                        r = r + [""] * (len(head) - len(r))
                         parts.append("<tr>" + "".join(f"<td>{c}</td>" for c in r) + "</tr>")
                     parts.append("</tbody>")
                 parts.append("</table>")
-                out.append("".join(parts))
+                out.append('<div class="tw">' + "".join(parts) + "</div>")
             continue
 
         listed = _LIST_RE.match(line)
@@ -286,6 +338,21 @@ _PAGE_STYLES = """  :root {
   th, td { border: 1px solid var(--border); padding: .42rem .7rem; text-align: left; vertical-align: top; }
   thead th { background: var(--panel-2); font-weight: 600; font-size: .78rem; }
   tbody tr:nth-child(even) { background: color-mix(in srgb, var(--panel-2) 45%, transparent); }
+  .tw { overflow-x: auto; }
+
+  /* symbol table: fixed column widths, so a long signature wraps inside its own
+     cell instead of squeezing the docs column into a one-character slit. */
+  table.sym { table-layout: fixed; min-width: 560px; }
+  table.sym th:nth-child(1) { width: 23%; }
+  table.sym th:nth-child(2) { width: 8%; }
+  table.sym th:nth-child(3) { width: 5%; }
+  table.sym th:nth-child(4) { width: 38%; }
+  table.sym th:nth-child(5) { width: 26%; }
+  table.sym td > code { display: inline-block; overflow-wrap: anywhere; }
+  table.sym td:nth-child(3) { font-family: var(--mono); color: var(--muted); font-size: .8rem; }
+  /* empty cells (constants carry no signature; some symbols carry no docs):
+     a faint dash reads as "none", where blank looks like a broken render. */
+  table.sym td:empty::after { content: "—"; color: var(--faint); }
 
   li { margin: .25rem 0; }
   ul, ol { padding-left: 1.3rem; }
