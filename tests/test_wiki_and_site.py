@@ -300,6 +300,19 @@ def _packet_with_layers_and_edges(pairs, *, layers=None):
         else []
     )
     edges = [Edge(source=f"mod::{s}", target=f"mod::{d}", type=EdgeType.IMPORTS) for s, d in pairs]
+    if layers:
+        from codewiki.layering import UNLAYERED_LAYER_ID
+
+        counts: dict[tuple[str, str], int] = {}
+        for s, d in pairs:
+            src = layers.get(s, UNLAYERED_LAYER_ID)
+            dst = layers.get(d, UNLAYERED_LAYER_ID)
+            if src != dst:
+                counts[(src, dst)] = counts.get((src, dst), 0) + 1
+        edges += [
+            Edge(source=src, target=dst, type=EdgeType.LAYER_DEPENDS, weight=weight)
+            for (src, dst), weight in counts.items()
+        ]
     return packet_from_parts(
         title="t",
         layers=layer_nodes,
@@ -848,3 +861,83 @@ def test_signature_hint_with_quotes_cannot_break_the_script(monkeypatch):
 
     literal = re.search(r"var hint = (.*?);", page).group(1)
     assert json.loads(literal) == 'open the "full" signature'
+
+
+def _packet_with_raw_edges(layer_specs, nodes, edges):
+    """直接按给定 nodes/edges 组装 packet（不走 builder 的聚合）。"""
+    return packet_from_parts(
+        title="t",
+        layers=[{"id": lid, "name": name, "order": i} for i, (lid, name) in enumerate(layer_specs)],
+        nodes=nodes,
+        edges=edges,
+        annotations=[],
+        diagnostics=[],
+    )
+
+
+def _two_layer_packet(*, layer_weight_a=52, layer_weight_b=66, calls_a=82, calls_b=76):
+    from codewiki.models import Edge, EdgeType, Node, NodeType
+
+    a, b = "layer::_internal", "layer::root"
+    nodes = [
+        Node(id="mod::a.py", type=NodeType.MODULE, path="a.py", layer_id=a),
+        Node(id="mod::b.py", type=NodeType.MODULE, path="b.py", layer_id=b),
+    ]
+    edges = [
+        Edge(source=a, target=b, type=EdgeType.LAYER_DEPENDS, weight=layer_weight_a),
+        Edge(source=b, target=a, type=EdgeType.LAYER_DEPENDS, weight=layer_weight_b),
+        *[Edge(source="mod::a.py", target="mod::b.py", type=EdgeType.CALLS) for _ in range(calls_a)],
+        *[Edge(source="mod::b.py", target="mod::a.py", type=EdgeType.CALLS) for _ in range(calls_b)],
+    ]
+    return _packet_with_raw_edges([(a, "_internal"), (b, "root")], nodes, edges), a, b
+
+
+def test_cross_layer_flows_uses_layer_depends_weights_only():
+    """TOP10 只数 LAYER_DEPENDS 的 weight —— 不把 CALLS 等模块级边再累加一遍。"""
+    from codewiki.render.layer_map import cross_layer_flows
+
+    packet, a, b = _two_layer_packet()
+
+    ranked, overflow = cross_layer_flows(packet)
+    assert dict(ranked) == {(a, b): 52, (b, a): 66}, f"应与系统图一致，实际: {ranked}"
+    assert overflow == 0
+
+
+def test_layer_map_shows_system_diagram_numbers_not_inflated_totals():
+    """首页 SVG 里出现的必须是 52/66，不能是 82/76。"""
+    from codewiki.render.layer_map import render_layer_map_svg
+
+    packet, _, _ = _two_layer_packet()
+    svg = render_layer_map_svg(packet)
+
+    assert ">52<" in svg and ">66<" in svg, svg[-1200:]
+    assert ">82<" not in svg and ">76<" not in svg, "CALLS 累加后的虚高数字不该出现"
+
+
+def test_band_io_counts_use_the_same_layer_depends_basis():
+    """层带的「出 x · 入 y」与连线徽标也得同口径，否则同页仍有两组数字。"""
+    from codewiki.render.layer_map import _layer_flow_counts
+
+    packet, a, b = _two_layer_packet()
+    io, pairs = _layer_flow_counts(packet)
+
+    assert io[a] == (52, 66) and io[b] == (66, 52), io
+    assert pairs[(a, b)] == 52 and pairs[(b, a)] == 66, pairs
+
+
+def test_unlayered_band_is_hidden_when_it_contains_no_modules():
+    """符号本来就没有层：「0 模块 · 2454 符号」这行是噪声，整行不画。"""
+    from codewiki.models import Node, NodeType
+    from codewiki.render.layer_map import render_layer_map_svg
+
+    lid = "layer::服务层"
+    nodes = [Node(id="mod::a.py", type=NodeType.MODULE, path="a.py", layer_id=lid)]
+    nodes += [
+        Node(id=f"sym::{i}", type=NodeType.SYMBOL, name=f"s{i}", module_id="mod::a.py") for i in range(5)
+    ]
+    packet = _packet_with_raw_edges([(lid, "服务层")], nodes, [])
+
+    svg = render_layer_map_svg(packet)
+
+    assert "0 模块 · 5 符号" not in svg, f"零模块的未分层带还在:\n{svg[:600]}"
+    assert "未分层" not in svg, "不该凭空多出一条未分层层带"

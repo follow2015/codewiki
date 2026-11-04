@@ -13,6 +13,29 @@
 
 ### 修复
 
+- **首页「跨层引用 TOP 10」与系统图数字对不上**（同一页两套数字）。builder 已把
+  跨层 ``IMPORTS`` 聚合进 ``LAYER_DEPENDS``（``weight = 跨层边数``），系统图只画它；
+  但首页 ``cross_layer_flows`` 把**所有**跨层边（``CALLS`` / ``IMPORTS`` / …）
+  按 weight 又累加了一遍 —— 用户复现 `_internal → root` 首页 82 / 系统图 52，
+  `root → _internal` 首页 76 / 系统图 66。现在 TOP10、层带「出/入」、相邻层连线徽标
+  共用同一个 ``_layer_pairs()``，只取 ``LAYER_DEPENDS`` 的 ``edge.weight``
+  （与系统图完全一致）。IPIP 实测 TOP10 与 ``system-context.mmd`` 的标签逐项相同：
+  458 / 243 / 214 / 135 / 127 / 104 / 65 / 60 / 37 / 11。
+- **首页「未分层」层带写着「0 模块 · 2454 符号」**。符号节点本来就不带
+  ``layer_id``，把它们算进未分层桶会画出一条零模块的层带，读起来像有两千多个
+  符号没分层。现在未分层桶只收模块节点：一个未分层模块都没有时整行不画；
+  有时只写模块数（IPIP 实测为「8 模块」，不再带符号数）。
+- **标准库遮蔽误伤「无 ``__init__.py`` 的脚本目录」**（低优先级回归）。
+  ``scripts/a.py: import json`` + ``scripts/json.py``、整条目录链都没有
+  ``__init__.py`` 时，旧判据只看「导入方在子目录」就把它当成 ``<包>.json``，
+  于是落 ``ext::json`` 并报一条 ``IMPORT_SHADOWED`` —— 但 ``python scripts/a.py``
+  时 ``sys.path[0]`` 就是 ``scripts/``，``import json`` 真会加载本地文件；pytest 的
+  rootdir 导入模式同理。PEP 420 命名空间包只在「作为包被导入」时成立，不覆盖脚本
+  场景。现在同目录候选仅当**目录链上有 ``__init__.py``**（含分析根是包）才判标准库；
+  其余情况保留本地依赖，并留一条 ``STDLIB_NAME_IN_SCRIPT_DIR`` 的 info 说明
+  「补上 __init__.py 后结论会变」。没有照「只看当前目录有无 __init__.py」的保守建议
+  实现：那会误伤 ``pkg/__init__.py`` + ``pkg/sub/`` 这类命名空间子包（已有两条用例
+  守护，变异验证里该方案被杀）。
 - **符号表被签名里的竖线切碎，整行右移、「说明」跑到表格外面**。md 侧把单元格内的
   `|` 写成 GFM 的 `\|`，但渲染侧的 `md_to_html` 直接 `line.split("|")` —— 转义没人
   认账。于是 `(self, ip: str) -> SwitchNode | None` 被切成

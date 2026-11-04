@@ -20,7 +20,7 @@ from __future__ import annotations
 import re
 
 from codewiki.layering import UNLAYERED_LAYER_ID
-from codewiki.models import NodeType
+from codewiki.models import EdgeType, NodeType
 from codewiki.render.escape import escape_attr
 from codewiki.render.i18n import t
 from codewiki.schemas import DataPacket
@@ -71,25 +71,40 @@ def _layer_buckets(packet: DataPacket):
         here = [n for n in remaining if n.layer_id == layer.id]
         remaining = [n for n in remaining if n.layer_id != layer.id]
         bands.append((layer.id, layer.name, here))
-    if remaining:
-        bands.append((_UNLAYERED_ID, t("common.unlayered"), remaining))
+    unlayered_modules = [n for n in remaining if n.type == NodeType.MODULE and n.path]
+    if unlayered_modules:
+        bands.append((_UNLAYERED_ID, t("common.unlayered"), unlayered_modules))
     return bands, names
 
 
-def cross_layer_flows(packet: DataPacket, *, top: int = 10):
-    """层与层之间的引用计数（同层边不计）；按条数降序，取前 ``top``。
+def _layer_pairs(packet: DataPacket) -> dict[tuple[str, str], int]:
+    """层间条数：**只**取 ``LAYER_DEPENDS`` 的 weight。
 
-    返回 ``[((src_lid, dst_lid), count), …]``；weight 累加过的重复边按
-    weight 计（与图谱口径一致）。
+    这是首页所有跨层数字（TOP10、层带出/入、相邻层连线徽标）与系统图共用的
+    唯一口径。builder 已把跨层 ``IMPORTS`` 聚合进 ``LAYER_DEPENDS``
+    （``weight = 跨层边数``），系统图也只画它。早期实现把**所有**跨层边
+    （``CALLS`` / ``IMPORTS`` / …）按 weight 再累加一遍，于是同一对层在首页
+    写 82、系统图写 52 —— 两张图摆在同一页，读者不知道信哪个。
+
+    ``LAYER_DEPENDS`` 的端点就是层 id（不在节点表里），所以这里不查
+    ``node_layer``，直接用边的 source/target。
     """
-    node_layer = {n.id: n.layer_id for n in packet.nodes}
-    counts: dict[tuple[str, str], int] = {}
+    pairs: dict[tuple[str, str], int] = {}
     for edge in packet.edges:
-        src = node_layer.get(edge.source)
-        dst = node_layer.get(edge.target)
-        if src and dst and src != dst:
-            counts[(src, dst)] = counts.get((src, dst), 0) + max(edge.weight, 1)
-    ranked = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
+        if edge.type != EdgeType.LAYER_DEPENDS or edge.source == edge.target:
+            continue
+        key = (edge.source, edge.target)
+        pairs[key] = pairs.get(key, 0) + edge.weight
+    return pairs
+
+
+def cross_layer_flows(packet: DataPacket, *, top: int = 10):
+    """层与层之间的引用条数（同层不计）；按条数降序，取前 ``top``。
+
+    返回 ``[((src_lid, dst_lid), count), …]`` 与溢出对数。口径见
+    :func:`_layer_pairs`：与系统图完全一致，只数 ``LAYER_DEPENDS``。
+    """
+    ranked = sorted(_layer_pairs(packet).items(), key=lambda kv: (-kv[1], kv[0]))
     return ranked[:top], len(ranked) - min(top, len(ranked))
 
 
@@ -121,19 +136,13 @@ def layer_anchor(lid: str) -> str:
 def _layer_flow_counts(packet: DataPacket) -> tuple[dict[str, tuple[int, int]], dict[tuple[str, str], int]]:
     """跨层引用统计：``(每层 (出, 入), {(源层, 宿层): 条数})``。
 
-    同层边不计。出/入按节点累计，一个节点可以既出又入，两条口径互不影响。
+    与 TOP10、系统图共用 :func:`_layer_pairs`，避免同页出现两套数字。
+    出/入分别累计，一个层可以既出又入，两条口径互不影响。
     """
-    node_layer = {n.id: n.layer_id for n in packet.nodes}
-    pairs: dict[tuple[str, str], int] = {}
+    pairs = _layer_pairs(packet)
     sent: dict[str, int] = {}
     received: dict[str, int] = {}
-    for edge in packet.edges:
-        src = node_layer.get(edge.source)
-        dst = node_layer.get(edge.target)
-        if not src or not dst or src == dst:
-            continue
-        weight = max(edge.weight, 1)
-        pairs[(src, dst)] = pairs.get((src, dst), 0) + weight
+    for (src, dst), weight in pairs.items():
         sent[src] = sent.get(src, 0) + weight
         received[dst] = received.get(dst, 0) + weight
     io = {lid: (sent.get(lid, 0), received.get(lid, 0)) for lid in set(sent) | set(received)}

@@ -11,10 +11,15 @@
 
 * 绝对导入 + 首段是标准库 + **本地同名文件在包内** ⇒ 标准库（本文件前四个用例）。
   "在包内"有两种形态：分析根本身是包（根下有 ``__init__.py``），或导入方位于子目录
-  （显式包与 PEP 420 命名空间包一样，其同名文件的全名都带包前缀）；
+  **且目录链上有 ``__init__.py``**（显式包与 PEP 420 命名空间包一样，其同名文件的
+  全名都带包前缀）；
 * 带包名前缀的绝对导入 / 相对导入 ⇒ 仍然指向包内文件（否则本地依赖整片消失）；
 * 分析根**不是**包（根下无 ``__init__.py``）⇒ 根下同名文件保持优先，因为那时
-  ``json.py`` 就在 ``sys.path[0]`` 上、确实是顶层模块，``import json`` 会加载它。
+  ``json.py`` 就在 ``sys.path[0]`` 上、确实是顶层模块，``import json`` 会加载它；
+* **整条目录链都没有 ``__init__.py``**（``scripts/a.py`` + ``scripts/json.py``）⇒
+  这是脚本目录：``python scripts/a.py`` 时 ``sys.path[0]`` 就是 ``scripts/``，
+  ``import json`` 真的加载本地文件。PEP 420 只在"作为包被导入"时成立，不覆盖脚本
+  场景。这里保留本地依赖，并留一条 ``STDLIB_NAME_IN_SCRIPT_DIR`` 的 info。
 """
 
 from __future__ import annotations
@@ -220,6 +225,48 @@ def test_root_package_subdir_without_init_does_not_shadow_stdlib():
     targets = _import_targets(result, "sub/a.py")
     assert external_id("typing") in targets, f"应落 External(typing)，实际: {targets}"
     assert module_id("sub/typing.py") not in targets
+
+
+def test_script_dir_without_init_keeps_local_stdlib_twin():
+    """脚本目录（整条目录链都没有 ``__init__.py``）的同名文件是**顶层模块**。
+
+    ``python scripts/a.py`` 时 ``sys.path[0]`` 就是 ``scripts/``，``import json``
+    真的加载 ``scripts/json.py``；pytest 的 rootdir 导入模式同理。PEP 420 命名空间
+    包只在「作为包被导入」时成立 —— 那时 ``scripts`` 前面得有个包。旧判据只看
+    ``base != ""``，把脚本目录也当成包内，于是丢掉真实依赖还报一条假 IMPORT_SHADOWED。
+    """
+    files = [
+        _fm("scripts/a.py", imports=[("json", None, 1)]),
+        _fm("scripts/json.py", symbols=[("loads", "loads", 1)]),
+    ]
+    result = build_graph(files)
+
+    targets = _import_targets(result, "scripts/a.py")
+    assert module_id("scripts/json.py") in targets, f"应连本地同名文件，实际: {targets}"
+    assert external_id("json") not in targets, "不该把脚本目录里的顶层模块判成标准库"
+    assert not [d for d in result.diagnostics if d.code == "IMPORT_SHADOWED"], (
+        "没有文件被忽略，不该报 IMPORT_SHADOWED"
+    )
+    info = [d for d in result.diagnostics if d.code == "STDLIB_NAME_IN_SCRIPT_DIR"]
+    assert info and info[0].level == "info", "要留一条 info：包导入模式下它会被标准库遮蔽"
+
+
+def test_ancestor_init_still_makes_namespace_subdir_a_package():
+    """守卫：`pkg/__init__.py` 存在时，`pkg/sub/` 即使无 init 也仍在包内。
+
+    回归修复不能把 PEP 420 命名空间子包一起放开 —— 那会让 pydantic 那批
+    ``import typing`` 重新连回包内同名文件。
+    """
+    files = [
+        _fm("pkg/__init__.py"),
+        _fm("pkg/sub/a.py", imports=[("typing", None, 1)]),
+        _fm("pkg/sub/typing.py"),
+    ]
+    result = build_graph(files)
+
+    targets = _import_targets(result, "pkg/sub/a.py")
+    assert external_id("typing") in targets, f"仍是包内同名文件，应落标准库，实际: {targets}"
+    assert not [d for d in result.diagnostics if d.code == "STDLIB_NAME_IN_SCRIPT_DIR"]
 
 
 __all__: list[str] = []

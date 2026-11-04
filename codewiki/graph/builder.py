@@ -729,9 +729,13 @@ class GraphBuilder:
           ``__init__.py``）时，它的全名才是 ``<包>.typing``、``import typing`` 落
           标准库。根不是包时它就在 ``sys.path[0]`` 上，是货真价实的顶层模块 ——
           那时连本地才对。
-        * **同目录候选**（``<调用方目录>/typing.py``）：只对"导入方在子目录里"的情形
-          有意义。此时它是 ``<包>.typing``（显式包或 PEP 420 命名空间包都一样），
-          永远不会成为顶层名。
+        * **同目录候选**（``<调用方目录>/typing.py``）：只有当**调用方目录链构成包**
+          （链上有 ``__init__.py``，含"分析根本身是包"）时，它才是 ``<包>.typing``、
+          永远不会成为顶层名 —— 显式包与 PEP 420 命名空间子包都算。整条链都没有
+          ``__init__.py`` 的是脚本目录（``python scripts/a.py`` 时 ``sys.path[0]``
+          就是 ``scripts/``），``import json`` 真的会加载 ``scripts/json.py``；
+          PEP 420 只在"作为包被导入"时成立，不覆盖脚本场景。这时保留本地依赖，
+          并留一条 ``STDLIB_NAME_IN_SCRIPT_DIR`` 的 info 说明"换个跑法结论会变"。
 
         所以这里先看根级候选、再单独看同目录候选，不能一次 ``or`` 完 —— 否则
         根不是包、根下又确实有 ``typing.py`` 的时候会漏掉一条真实依赖，还会报一条
@@ -750,6 +754,9 @@ class GraphBuilder:
         if root_local is not None and not root_is_package:
             return False
         sibling_local = self._probe_candidate(f"{base}/{absolute}") if base else None
+        if sibling_local is not None and not self._in_package_tree(base):
+            self._note_script_dir_twin(sibling_local, absolute, from_module)
+            return False
         local = root_local or sibling_local
         if local is None:
             return False
@@ -769,6 +776,40 @@ class GraphBuilder:
                 )
             )
         return True
+
+    def _in_package_tree(self, base: str) -> bool:
+        """调用方目录到分析根的链上有没有 ``__init__.py``。
+
+        根本身是包时整棵树都在包里（PEP 420 命名空间子目录也算）；否则逐级
+        向上找。一条链都没有 ⇒ 这是脚本目录 / 松散目录，按脚本方式运行时
+        ``sys.path[0]`` 可能就是它，同名文件是货真价实的顶层模块。
+        """
+        if "__init__.py" in self._files:
+            return True
+        segments = base.split("/")
+        return any(
+            f"{'/'.join(segments[:i])}/__init__.py" in self._files for i in range(1, len(segments) + 1)
+        )
+
+    def _note_script_dir_twin(self, local: str, absolute: str, from_module: str) -> None:
+        """脚本目录里的标准库同名文件：这次连本地，但"换个跑法结论会变"要说出来。"""
+        marker = (from_module, absolute)
+        if marker in self._shadowed_reported:
+            return
+        self._shadowed_reported.add(marker)
+        self.diagnostics.append(
+            Diagnostic(
+                level="info",
+                code="STDLIB_NAME_IN_SCRIPT_DIR",
+                message=(
+                    f"绝对导入 {absolute!r} 命中脚本目录里的同名文件 {local}；"
+                    "该目录链上没有 __init__.py，按脚本方式运行时 sys.path[0] 就是它，"
+                    "所以这里连本地。若改成作为包导入（补 __init__.py），"
+                    "这条 import 会落到标准库"
+                ),
+                where=from_module,
+            )
+        )
 
     def _note_shadowed(self, sibling: str | None, root_hit: str, dotted: str, from_module: str) -> None:
         """根候选与包内同名候选并存时报一条诊断 —— 挑了哪个要说出来。"""
