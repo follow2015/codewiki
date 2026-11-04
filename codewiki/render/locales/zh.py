@@ -32,6 +32,7 @@ CATALOG: dict[str, str] = {
     "wiki.context_diagram": "## 上下文图",
     "wiki.symbols": "## 符号",
     "wiki.symbol_header": "| 名称 | 类型 | 行 | 签名 | 说明 |",
+    "wiki.signature_hint": "点击展开完整签名",
     "wiki.neighbors": "## 上下游",
     "wiki.upstream": "**上游**（谁用到我）",
     "wiki.downstream": "**下游**（我依赖谁）",

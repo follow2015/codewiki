@@ -37,6 +37,7 @@ CATALOG: dict[str, str] = {
     "wiki.context_diagram": "## Context diagram",
     "wiki.symbols": "## Symbols",
     "wiki.symbol_header": "| Name | Kind | Line | Signature | Docs |",
+    "wiki.signature_hint": "Click to expand the full signature",
     "wiki.neighbors": "## Neighbors",
     "wiki.upstream": "**Upstream** (who uses me)",
     "wiki.downstream": "**Downstream** (what I depend on)",

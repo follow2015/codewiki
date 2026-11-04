@@ -778,6 +778,73 @@ def test_long_signature_is_clamped_and_expands_on_hover():
     page = render_module_html(md, title="t")
 
     assert "-webkit-line-clamp: 6" in page, "默认要截断到 6 行"
-    assert "td:nth-child(4) > code:hover" in page, "悬停要恢复全文"
     assert "-webkit-line-clamp: unset" in page
     assert "c: list[str] | None = None) -&gt; dict[str, int] | None</code>" in html
+
+
+def test_hover_expand_is_gated_behind_a_real_pointer():
+    """悬停展开必须关在 ``@media (hover: hover)`` 里，否则触屏上点不动。
+
+    iOS 的 tap 会顺带把 ``:hover`` 粘住：无条件 hover 规则下，第一次 tap「展开」
+    其实是 hover 生效，第二次 tap 切掉 ``data-expanded`` 后 hover 仍然撑着，
+    看起来就是点了没反应。
+    """
+    import re
+
+    from codewiki.render.site import render_module_html
+
+    page = render_module_html("| a |\n| --- |\n| b |\n", title="t")
+
+    assert re.search(r"@media \(hover: hover\) \{\s*table\.sym td:nth-child\(4\) > code:hover", page), (
+        "hover 规则要落在 (hover: hover) 媒体查询内"
+    )
+    assert "table.sym td:nth-child(4) > code[data-expanded]" in page
+
+
+def test_touch_users_can_tap_a_clipped_signature_open_and_shut():
+    """触屏靠点击/回车切换：只有**度量出真被截断**的签名才可点、可聚焦。"""
+    from codewiki.render.site import render_module_html
+
+    page = render_module_html("| a |\n| --- |\n| b |\n", title="t")
+
+    assert 'document.querySelectorAll("table.sym td:nth-child(4) > code")' in page
+    assert "el.scrollHeight - el.clientHeight" in page
+    assert page.index("data-clipped") < page.index('el.setAttribute("tabindex", "0")')
+    for hook in ('addEventListener("click"', 'addEventListener("keydown"', "aria-expanded"):
+        assert hook in page, hook
+    assert '"Enter"' in page and '" "' in page, "键盘要能用回车/空格切换"
+
+
+def test_signature_hint_is_escaped_into_the_script_as_a_literal():
+    """提示文案走 ``json.dumps`` 填进 JS：里面带引号也不会把脚本拼坏。"""
+    import json
+    import re
+
+    from codewiki.render.i18n import set_lang, t
+    from codewiki.render.site import render_module_html
+
+    try:
+        set_lang("en")
+        page = render_module_html("| a |\n| --- |\n| b |\n", title="t")
+        literal = re.search(r"var hint = (.*?);", page).group(1)
+        assert json.loads(literal) == t("wiki.signature_hint")
+        assert "Click to expand" in json.loads(literal)
+    finally:
+        set_lang("zh")
+
+    page = render_module_html("| a |\n| --- |\n| b |\n", title="t")
+    assert "点击展开完整签名" in page
+
+
+def test_signature_hint_with_quotes_cannot_break_the_script(monkeypatch):
+    """文案里带双引号也不能把脚本拼坏 —— 这是 ``json.dumps`` 而非手拼的意义。"""
+    import json
+    import re
+
+    from codewiki.render.site import render_module_html
+
+    monkeypatch.setattr("codewiki.render.site.t", lambda key, **fmt: 'open the "full" signature')
+    page = render_module_html("| a |\n| --- |\n| b |\n", title="t")
+
+    literal = re.search(r"var hint = (.*?);", page).group(1)
+    assert json.loads(literal) == 'open the "full" signature'

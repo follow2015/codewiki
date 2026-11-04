@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 import zipfile
 from pathlib import Path
@@ -343,20 +344,38 @@ _PAGE_STYLES = """  :root {
   /* symbol table: fixed column widths, so a long signature wraps inside its own
      cell instead of squeezing the docs column into a one-character slit. */
   table.sym { table-layout: fixed; min-width: 560px; }
-  table.sym th:nth-child(1) { width: 23%; }
-  table.sym th:nth-child(2) { width: 8%; }
-  table.sym th:nth-child(3) { width: 5%; }
-  table.sym th:nth-child(4) { width: 38%; }
-  table.sym th:nth-child(5) { width: 26%; }
+  table.sym th:nth-child(1) { width: 24%; }
+  table.sym th:nth-child(2) { width: 9%; }
+  table.sym th:nth-child(3) { width: 6%; }
+  table.sym th:nth-child(4) { width: 36%; }
+  table.sym th:nth-child(5) { width: 25%; }
+  /* the name column overflows too: a long name like
+     `register_personal_notification_channel` will not wrap inside a fixed column,
+     so it runs over the kind and line columns (worst at phone width). */
+  table.sym td:nth-child(1) > code { overflow-wrap: anywhere; }
   table.sym td:nth-child(3) { font-family: var(--mono); color: var(--muted); font-size: .8rem; }
-  /* signatures: clamp to 6 lines, full text on hover. Line clamp (not max-height)
-     ends on a line boundary and draws the ellipsis itself, so a clamped cell never
-     looks sliced in half; growth is downward, so the hover stays on the element. */
+  /* signatures: clamp to 6 lines. Line clamp (not max-height) ends on a line
+     boundary and draws the ellipsis itself, so a clamped cell never looks sliced
+     in half; growth is downward, so the pointer never lands outside the element. */
   table.sym td:nth-child(4) > code {
     display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 6;
     overflow: hidden; overflow-wrap: anywhere;
   }
-  table.sym td:nth-child(4) > code:hover { -webkit-line-clamp: unset; overflow: visible; }
+  /* Hover only where a pointer can actually hover. On iOS a tap also latches
+     :hover, which would fight the tap toggle below -- tap opens, hover keeps it
+     open, so the second tap looks like it does nothing. */
+  @media (hover: hover) {
+    table.sym td:nth-child(4) > code:hover { -webkit-line-clamp: unset; overflow: visible; }
+  }
+  /* Tap/click toggle. The script stamps data-clipped only on signatures it
+     measured as clipped: a tabindex on all ~8k of them would make Tab walk
+     hundreds of stops on a symbol-heavy page. */
+  table.sym td:nth-child(4) > code[data-expanded] { -webkit-line-clamp: unset; overflow: visible; }
+  table.sym td:nth-child(4) > code[data-clipped] { cursor: zoom-in; }
+  table.sym td:nth-child(4) > code[data-clipped][data-expanded] { cursor: zoom-out; }
+  table.sym td:nth-child(4) > code[data-clipped]:focus-visible {
+    outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px;
+  }
   /* empty cells (constants carry no signature; some symbols carry no docs):
      a faint dash reads as "none", where blank looks like a broken render. */
   table.sym td:empty::after { content: "—"; color: var(--faint); }
@@ -468,6 +487,44 @@ _DIAGRAM_INTERACT = """<script>
 </script>
 """
 
+_SIGNATURE_TOGGLE = """<script>
+(function () {
+  "use strict";
+  var hint = __HINT__;
+  var touch = window.matchMedia && window.matchMedia("(hover: none)").matches;
+  document.querySelectorAll("table.sym td:nth-child(4) > code").forEach(function (el) {
+    // the clamp holds 6 lines; whatever overflows the box is what is hidden
+    if (el.scrollHeight - el.clientHeight < 4) return;
+    el.setAttribute("data-clipped", "");
+    el.setAttribute("tabindex", "0");
+    el.setAttribute("role", "button");
+    el.setAttribute("aria-expanded", "false");
+    if (touch) el.setAttribute("title", hint);
+    function toggle(ev) {
+      if (ev.type === "keydown") {
+        if (ev.key !== "Enter" && ev.key !== " ") return;
+        ev.preventDefault();
+      } else {
+        var sel = window.getSelection && window.getSelection();
+        // mid-selection click: the user is copying the signature, not folding it
+        if (sel && String(sel)) return;
+      }
+      var open = !el.hasAttribute("data-expanded");
+      if (open) el.setAttribute("data-expanded", ""); else el.removeAttribute("data-expanded");
+      el.setAttribute("aria-expanded", open ? "true" : "false");
+    }
+    el.addEventListener("click", toggle);
+    el.addEventListener("keydown", toggle);
+  });
+})();
+</script>
+"""
+
+
+def _signature_toggle() -> str:
+    """签名展开脚本（提示文案按当前语言取）。"""
+    return _SIGNATURE_TOGGLE.replace("__HINT__", json.dumps(t("wiki.signature_hint"), ensure_ascii=False))
+
 
 def render_module_html(md: str, *, title: str, asset_prefix: str = "") -> str:
     """模块页 HTML：md_to_html 渲染 + 站点壳（设计系统样式与 mermaid 资产）。
@@ -489,6 +546,7 @@ def render_module_html(md: str, *, title: str, asset_prefix: str = "") -> str:
         f'  </div>\n  <script src="{asset_prefix}{MERMAID_ASSET}"></script>\n'
         f"  {_MERMAID_INIT}"
         f"  {_DIAGRAM_INTERACT}"
+        f"  {_signature_toggle()}"
         "</body>\n</html>\n"
     )
 
