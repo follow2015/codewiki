@@ -9,10 +9,12 @@
 
 判据分两半，缺一就退化成两种相反的错误：
 
-* 绝对导入 + 首段是标准库 + **分析根本身是包** ⇒ 标准库（本文件前四个用例）；
+* 绝对导入 + 首段是标准库 + **本地同名文件在包内** ⇒ 标准库（本文件前四个用例）。
+  "在包内"有两种形态：分析根本身是包（根下有 ``__init__.py``），或导入方位于子目录
+  （显式包与 PEP 420 命名空间包一样，其同名文件的全名都带包前缀）；
 * 带包名前缀的绝对导入 / 相对导入 ⇒ 仍然指向包内文件（否则本地依赖整片消失）；
-* 分析根**不是**包（根下无 ``__init__.py``）⇒ 保持"根下同名文件优先"，
-  因为那时 ``json.py`` 确实是顶层模块，``import json`` 会加载它（Python 语义）。
+* 分析根**不是**包（根下无 ``__init__.py``）⇒ 根下同名文件保持优先，因为那时
+  ``json.py`` 就在 ``sys.path[0]`` 上、确实是顶层模块，``import json`` 会加载它。
 """
 
 from __future__ import annotations
@@ -151,6 +153,73 @@ def test_non_stdlib_bare_import_keeps_existing_resolution():
 
     targets = _import_targets(result, "a.py")
     assert module_id("helpers.py") in targets, f"非标准库的绝对导入应保持原有解析结果，实际: {targets}"
+
+
+def test_stdlib_wins_when_importer_sits_in_a_subpackage():
+    """仓库根不是包、但导入方在包内：``pkg/typing.py`` 不是顶层 ``typing``。
+
+    这是 src-layout / monorepo 的常见形态（``--src .`` 而代码在 ``pkg/`` 里）。
+    旧判据只看"根是不是包"，于是漏判，随后落进"同目录兜底"连到 ``pkg/typing.py``。
+    """
+    files = [
+        _fm("pkg/__init__.py"),
+        _fm("pkg/a.py", imports=[("typing", None, 1)]),
+        _fm("pkg/typing.py"),
+    ]
+    result = build_graph(files)
+
+    targets = _import_targets(result, "pkg/a.py")
+    assert external_id("typing") in targets, f"应落 External(typing)，实际边: {targets}"
+    assert module_id("pkg/typing.py") not in targets, "包内同名文件的全名是 pkg.typing，不是顶层 typing"
+
+
+def test_root_level_same_named_file_still_wins_when_importer_is_in_a_package():
+    """反方向的守卫：根不是包时，根下的同名文件就在 ``sys.path[0]`` 上。
+
+    它**不是**包内文件 —— ``pkg/a.py: import typing`` 真的会加载 ``<根>/typing.py``。
+    把"导入方在包内"当成"一律判标准库"会丢掉这条真实依赖，还会报一条假诊断。
+    """
+    files = [
+        _fm("typing.py"),
+        _fm("pkg/__init__.py"),
+        _fm("pkg/a.py", imports=[("typing", None, 1)]),
+    ]
+    result = build_graph(files)
+
+    targets = _import_targets(result, "pkg/a.py")
+    assert module_id("typing.py") in targets, f"根下同名文件是顶层模块，应连本地，实际: {targets}"
+    assert external_id("typing") not in targets
+    assert not [d for d in result.diagnostics if d.code == "IMPORT_SHADOWED"], (
+        "并没有文件被忽略，不该报 IMPORT_SHADOWED"
+    )
+
+
+def test_namespace_subpackage_does_not_shadow_stdlib():
+    """祖先目录是包、自身目录没有 ``__init__.py``（PEP 420 命名空间子包）同样在包内。"""
+    files = [
+        _fm("pkg/__init__.py"),
+        _fm("pkg/sub/a.py", imports=[("typing", None, 1)]),
+        _fm("pkg/sub/typing.py"),
+    ]
+    result = build_graph(files)
+
+    targets = _import_targets(result, "pkg/sub/a.py")
+    assert external_id("typing") in targets, f"应落 External(typing)，实际: {targets}"
+    assert module_id("pkg/sub/typing.py") not in targets
+
+
+def test_root_package_subdir_without_init_does_not_shadow_stdlib():
+    """根是包、子目录没有 ``__init__.py``：``sub/typing.py`` 的全名仍是 ``<包>.sub.typing``。"""
+    files = [
+        _fm("__init__.py"),
+        _fm("sub/a.py", imports=[("typing", None, 1)]),
+        _fm("sub/typing.py"),
+    ]
+    result = build_graph(files)
+
+    targets = _import_targets(result, "sub/a.py")
+    assert external_id("typing") in targets, f"应落 External(typing)，实际: {targets}"
+    assert module_id("sub/typing.py") not in targets
 
 
 __all__: list[str] = []

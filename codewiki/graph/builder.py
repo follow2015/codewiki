@@ -715,17 +715,27 @@ class GraphBuilder:
         return self._probe_candidate(sibling) if sibling else None
 
     def _stdlib_shadows_local(self, absolute: str, parts: list[str], from_module: str) -> bool:
-        """绝对导入的首段是标准库、而"本地命中"其实落在包内 ⇒ 判标准库。
+        """绝对导入的首段是标准库、而"本地命中"只是包内同名文件 ⇒ 判标准库。
 
-        返回 ``True`` 表示调用方应落 ``External``。三个条件缺一不可：
+        返回 ``True`` 表示调用方应落 ``External``。前提两条：首段在
+        :data:`sys.stdlib_module_names` 里、且不在 ``_root_names``（带包名前缀的绝对
+        导入明确指向包内，如 ``from pkg.typing import X``；相对导入在更前面的分支
+        就返回了，进不到这里）。
 
-        1. 首段在 :data:`sys.stdlib_module_names` 里；
-        2. 首段不在 ``_root_names``（那是"带包名前缀"，明确指向包内，如
-           ``from pkg.typing import X``）；相对导入在更前面的分支就返回了，进不到这里；
-        3. **分析根目录本身是包**（根下有 ``__init__.py``）。
+        剩下要判的是"本地到底有没有**真的顶层**同名模块"。两个候选的位置不同，
+        判据也必须不同 —— 合成一个闸门会同时错两头：
 
-        第 3 条是分水岭：根不是包时，根下的 ``json.py`` 就是顶层模块，
-        ``import json`` 会真的加载它 —— 那时连本地才是 Python 的语义。
+        * **根级候选**（``<根>/typing.py``）：只有分析根本身是包（根下有
+          ``__init__.py``）时，它的全名才是 ``<包>.typing``、``import typing`` 落
+          标准库。根不是包时它就在 ``sys.path[0]`` 上，是货真价实的顶层模块 ——
+          那时连本地才对。
+        * **同目录候选**（``<调用方目录>/typing.py``）：只对"导入方在子目录里"的情形
+          有意义。此时它是 ``<包>.typing``（显式包或 PEP 420 命名空间包都一样），
+          永远不会成为顶层名。
+
+        所以这里先看根级候选、再单独看同目录候选，不能一次 ``or`` 完 —— 否则
+        根不是包、根下又确实有 ``typing.py`` 的时候会漏掉一条真实依赖，还会报一条
+        "包内同名文件被忽略"的假诊断。
 
         忽略包内同名文件是**正确**行为，所以诊断级别是 ``info``：既让人知道
         "这里有个同名文件没被用上"，又不会和真正的「仓根劫持包内」警告混为一谈。
@@ -733,9 +743,14 @@ class GraphBuilder:
         head = parts[0]
         if head not in sys.stdlib_module_names or head in self._root_names:
             return False
-        if "__init__.py" not in self._files:
+
+        root_is_package = "__init__.py" in self._files
+        base = from_module.rsplit("/", 1)[0] if "/" in from_module else ""
+        root_local = self._probe_candidate(absolute)
+        if root_local is not None and not root_is_package:
             return False
-        local = self._probe_candidate(absolute)
+        sibling_local = self._probe_candidate(f"{base}/{absolute}") if base else None
+        local = root_local or sibling_local
         if local is None:
             return False
 

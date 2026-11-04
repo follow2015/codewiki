@@ -19,6 +19,8 @@ from __future__ import annotations
 import hashlib
 from dataclasses import dataclass, field
 
+import networkx as nx
+
 from codewiki.layering import UNLAYERED_LAYER_ID
 from codewiki.models import EdgeType, NodeType
 from codewiki.render.i18n import t
@@ -330,34 +332,33 @@ def _hub_counts(edges: list, *, module_count: int) -> dict[str, int]:
 def _transitive_reduce(edges: list) -> tuple[list, int]:
     """去掉"已有另一条路径可达"的直连边，返回 ``(保留的边, 省略条数)``。
 
-    逐边做可达性检查：去掉它之后，起点是否仍能到终点。E、V 都在百级，
-    O(E·(V+E)) 完全够用；``nx.transitive_reduction`` 只接受 DAG，而层内可能有环，
-    用它还得先缩点再展开。
+    **先缩点再归约**：环内的边一条都不动，只对强连通分量之间的边做传递归约。
+
+    为什么不能逐边判断"去掉它后还可达吗"：判据是"其余**全部**边"，而不是"实际
+    保留的边"。环里 ``A→B``、``C→B``、``A↔C`` 这几条边，``A→B`` 有备选路径
+    ``A→C→B``、``C→B`` 有备选路径 ``C→A→B``，两条都被判可删 —— B 的入边被清空，
+    图上只剩一个孤立方框，图注还写着"省略 2 条"。而且只在层内有环、边数超阈值时
+    才触发，恰好是最需要看清依赖的场景。
+
+    缩点后分量图是 DAG，``nx.transitive_reduction`` 的结果与遍历顺序无关，可达性
+    有保证；同一对分量之间的平行边整体保留或整体省略。复杂度 O(V·E)，不再是 O(E²)。
     """
+    graph = nx.DiGraph()
+    for edge in edges:
+        graph.add_edge(edge.source, edge.target)
+    condensed = nx.condensation(graph)
+    member_of: dict[str, int] = {}
+    for comp, data in condensed.nodes(data=True):
+        for node in data["members"]:
+            member_of[node] = comp
+    reduced = nx.transitive_reduction(condensed)
+
     kept = []
     for edge in edges:
-        adjacent: dict[str, list[str]] = {}
-        for other in edges:
-            if other is edge:
-                continue
-            adjacent.setdefault(other.source, []).append(other.target)
-        if not _reachable(adjacent, edge.source, edge.target):
+        src, dst = member_of[edge.source], member_of[edge.target]
+        if src == dst or reduced.has_edge(src, dst):
             kept.append(edge)
     return kept, len(edges) - len(kept)
-
-
-def _reachable(adjacent: dict[str, list[str]], source: str, target: str) -> bool:
-    seen = {source}
-    stack = [source]
-    while stack:
-        current = stack.pop()
-        if current == target:
-            return True
-        for nxt in adjacent.get(current, ()):
-            if nxt not in seen:
-                seen.add(nxt)
-                stack.append(nxt)
-    return False
 
 
 def _module_edges(packet: DataPacket, min_confidence: float, *, subset: set[str]) -> list:
