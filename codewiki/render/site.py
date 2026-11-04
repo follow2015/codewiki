@@ -348,8 +348,15 @@ _PAGE_STYLES = """  :root {
   table.sym th:nth-child(3) { width: 5%; }
   table.sym th:nth-child(4) { width: 38%; }
   table.sym th:nth-child(5) { width: 26%; }
-  table.sym td > code { display: inline-block; overflow-wrap: anywhere; }
   table.sym td:nth-child(3) { font-family: var(--mono); color: var(--muted); font-size: .8rem; }
+  /* signatures: clamp to 6 lines, full text on hover. Line clamp (not max-height)
+     ends on a line boundary and draws the ellipsis itself, so a clamped cell never
+     looks sliced in half; growth is downward, so the hover stays on the element. */
+  table.sym td:nth-child(4) > code {
+    display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 6;
+    overflow: hidden; overflow-wrap: anywhere;
+  }
+  table.sym td:nth-child(4) > code:hover { -webkit-line-clamp: unset; overflow: visible; }
   /* empty cells (constants carry no signature; some symbols carry no docs):
      a faint dash reads as "none", where blank looks like a broken render. */
   table.sym td:empty::after { content: "—"; color: var(--faint); }

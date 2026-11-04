@@ -758,3 +758,26 @@ def test_symbol_table_uses_docstring_summary_not_field_list():
     html = md_to_html(md)
 
     assert "Args:" not in html, md
+
+
+def test_long_signature_is_clamped_and_expands_on_hover():
+    """超长签名默认折行到 6 行就截断，悬停展开全文。
+
+    服务端**不截断**：截断是 CSS 的 line-clamp，所以悬停/复制都能拿到完整签名。
+    用 line-clamp 而不是 max-height：前者收在行边界并自带省略号，后者会把一行
+    劈成两半，看着像渲染坏了。
+    """
+    from codewiki.render.site import md_to_html
+
+    sig = "(self, a: str | None = None, b: dict[str, int] | None = None, c: list[str] | None = None) -> dict[str, int] | None"
+    md = (
+        "| 名称 | 类型 | 行 | 签名 | 说明 |\n| --- | --- | --- | --- | --- |\n"
+        f"| `f` | method | 1 | `{sig.replace('|', chr(92) + '|')}` | 说明。 |\n"
+    )
+    html = md_to_html(md)
+    page = render_module_html(md, title="t")
+
+    assert "-webkit-line-clamp: 6" in page, "默认要截断到 6 行"
+    assert "td:nth-child(4) > code:hover" in page, "悬停要恢复全文"
+    assert "-webkit-line-clamp: unset" in page
+    assert "c: list[str] | None = None) -&gt; dict[str, int] | None</code>" in html
