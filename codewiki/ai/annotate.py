@@ -363,6 +363,24 @@ def _evidence_is_real(evidence: list[dict], *, src_root: Path | None, note: str 
     return check_evidence(evidence, note=note, src_root=src_root).ok
 
 
+def _evidence_brief(evidence: Sequence[dict], *, limit: int = 6) -> str:
+    """把证据位置压成一行（``pkg/core.py:23``）。
+
+    拒绝记录里最要紧的两件事是"哪个模块"和"它当时引了哪一行" —— 后者是判断
+    门禁是否误杀的唯一切入点，不能只留一句"证据不支持"。
+    """
+    parts: list[str] = []
+    for item in (evidence or [])[:limit]:
+        rel = item.get("path")
+        if not isinstance(rel, str) or not rel:
+            continue
+        nums = [n for n in (item.get("lines") or []) if isinstance(n, int)]
+        parts.append(f"{rel}:{','.join(str(n) for n in nums)}" if nums else rel)
+    if len(evidence or []) > limit:
+        parts.append(f"…（共 {len(evidence)} 条）")
+    return "、".join(parts) or "（无）"
+
+
 def _ask(
     client,
     history: list[ChatMessage],
@@ -420,6 +438,7 @@ def _ask(
             outcome="ok",
             detail=reply.content,
             tokens=budget.used,
+            full_detail=True,
         )
     return reply.content, "ok"
 
@@ -518,6 +537,13 @@ def annotate_modules(
                 continue
             if status == "unavailable":
                 break
+        elif audit:
+            audit.record(
+                tool="llm.cache",
+                args={"target": module["id"]},
+                outcome="hit",
+                detail=f"命中缓存（key {key[:12]}），本轮未调用模型",
+            )
 
         outcome = _parse_suggestions(raw)
         if not outcome.ok:
@@ -599,17 +625,39 @@ def annotate_modules(
                         where=module["id"],
                     )
                 )
+                if audit:
+                    audit.record(
+                        tool="llm.evidence",
+                        args={"target": module["id"]},
+                        outcome="rejected",
+                        detail=(
+                            f"AI_TARGET_MISMATCH: 模型返回了非本模块的 target"
+                            f"（{suggestion.target}），已丢弃｜证据 {_evidence_brief(suggestion.evidence)}"
+                        ),
+                        code="AI_TARGET_MISMATCH",
+                        full_detail=True,
+                    )
                 continue
             verdict = check_evidence(suggestion.evidence, note=suggestion.note, src_root=src_root)
             if not verdict.ok:
+                code = verdict.code or "AI_EVIDENCE_INVALID"
                 result.diagnostics.append(
                     Diagnostic(
                         level="warning",
-                        code=verdict.code or "AI_EVIDENCE_INVALID",
+                        code=code,
                         message=verdict.detail,
                         where=suggestion.target,
                     )
                 )
+                if audit:
+                    audit.record(
+                        tool="llm.evidence",
+                        args={"target": suggestion.target},
+                        outcome="rejected",
+                        detail=f"{code}: {verdict.detail}｜证据 {_evidence_brief(suggestion.evidence)}",
+                        code=code,
+                        full_detail=True,
+                    )
                 continue
             result.suggestions.append(suggestion)
             accepted = True

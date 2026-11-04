@@ -13,6 +13,17 @@
 
 ### 修复
 
+- **审计留痕断链：证据门禁丢弃的作答不留痕，长原文被截到 240 字符**。
+  `ai-audit.jsonl` 此前只能溯到「谁、何时、成败」：`AI_EVIDENCE_UNSUPPORTED` /
+  `AI_EVIDENCE_INVALID` / `AI_TARGET_MISMATCH` 只写进 `diagnostics`（随产物发布、
+  常被按级别过滤），而 `detail` 走 `summarize` 一律截断到 241 字符 —— 模型习惯把
+  `file:line` 证据放在结论末尾，正好被切掉，复核"门禁是否误杀"时只能靠比对两轮
+  detail 的差异反推（2026-11-04 复核 ipip 产物时实测）。现在：三类丢弃各写一条
+  `llm.evidence` / `outcome=rejected` 审计行，带 `code` 与所引证据位置；`llm.chat`
+  传 `full_detail=True`，超限时额外落完整脱敏文本 `detail_full` 与 `detail_chars`
+  （短内容不写这两个字段，文件不额外膨胀）；命中缓存记 `llm.cache` /
+  `outcome=hit`，不再把"复用旧答案"与"真调了模型"混为一谈。审计是旁路文件而非
+  数据包，**新增字段均为可选、旧读取方忽略即可**；既有审计文件不会被回填。
 - **安全：生成的站点页里 docstring / 注解里的 `javascript:` 链接会原样成为可点击链接**。
   被分析仓库的 docstring（第一行进符号表「说明」列）、人工/AI 注解、层名都走 `_inline` 的
   链接规则，而页面没有 CSP（有内联脚本，CSP 也挡不住）。链接正则排除了括号与空白，
