@@ -8,8 +8,9 @@ enabled = false"，而实际行为是"有 ``--model`` 就跑"，仓库作者写 
 三态语义（缺省 / false / true）以及它与 :mod:`codewiki.trust` 的分工：
 
 * 缺省 ``None``：不干预，由命令行与环境变量决定；
-* ``false``：**拒绝**，三个 AI 命令一律 exit 2（``merge-annotations`` 不受管 ——
-  它不调模型，只是把建议文件合进配置，是人工环节）；
+* ``false``：**拒绝**，四个 AI 入口一律 exit 2（ai-annotate / agent / diagram /
+  init --ai；``merge-annotations`` 不受管 —— 它不调模型，只是把建议文件合进配置，
+  是人工环节）；
 * ``true``：**允许但不强制**。端点与模型仍只认操作者：让配置文件里的 true 能开启
   AI，等于把 ``OPENAI_API_KEY`` 的去向交给被分析仓库。
 
@@ -80,6 +81,36 @@ def test_env_force_ai_is_recognised(monkeypatch):
     assert is_force_ai({ENV_FORCE_AI: "1"}) is True
     assert is_force_ai({ENV_FORCE_AI: "YES"}) is True
     assert is_force_ai({ENV_FORCE_AI: "0"}) is False
+
+
+def test_denial_can_be_asked_for_without_the_stderr_prefix(tmp_path):
+    """调用方要复用它（init 的降级提示）时不该去剥 ``error: `` 这层皮。
+
+    ``removeprefix`` 是拿另一个模块的文案当 API：措辞一改就静默漏出
+    ``note: error: …``。前缀与出处都由参数决定。
+    """
+    path = tmp_path / "codewiki.toml"
+    path.write_text(_cfg_text("false"), encoding="utf-8")
+    cfg = load_config(path)
+
+    plain = ai_denied(cfg, prefix=False)
+    prefixed = ai_denied(cfg)
+
+    assert plain is not None and prefixed is not None
+    assert not plain.startswith("error:")
+    assert prefixed == f"error: {plain}"
+
+
+def test_denial_can_name_the_config_it_read(tmp_path):
+    """候选文件有三份时，``该仓库的 codewiki.toml`` 等于让人去猜是哪一份。"""
+    path = tmp_path / "codewiki.toml"
+    path.write_text(_cfg_text("false"), encoding="utf-8")
+    message = ai_denied(load_config(path), source=f"（{path}）")
+
+    assert message is not None
+    assert str(path) in message
+    assert "enabled = false" in message
+    assert "--force-ai" in message
 
 
 def _packet(tmp_path):
@@ -171,8 +202,12 @@ def test_merge_annotations_is_not_gated(tmp_path, capsys):
 
 
 def test_force_ai_wired_on_ai_commands():
+    """四个 AI 入口都必须认同一对开关（``--force-ai`` / ``CODEWIKI_FORCE_AI``）。
+
+    少了任何一个，那个命令的拒绝就变成了死路 —— 用户只能去删项目方写的那一行。
+    """
     parser = build_parser()
-    for argv in (["ai-annotate"], ["agent"]):
+    for argv in (["ai-annotate"], ["agent"], ["ai-diagram"], ["init"]):
         args = parser.parse_args(argv)
         assert args.force_ai is False, f"{argv[0]} 缺 --force-ai"
         assert parser.parse_args([*argv, "--force-ai"]).force_ai is True

@@ -66,22 +66,33 @@ def is_force_ai(env: dict[str, str] | None = None) -> bool:
     return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
-def ai_denied(cfg: CodewikiConfig, *, force: bool = False) -> str | None:
+def ai_denied(
+    cfg: CodewikiConfig,
+    *,
+    force: bool = False,
+    source: str = "该仓库的 codewiki.toml",
+    prefix: bool = True,
+) -> str | None:
     """配置显式声明 ``[ai] enabled = false`` 时返回**拒绝理由**（含如何覆盖）。
 
     只认显式的 ``false``：缺省是 ``None``，老配置（及其作者）只是没写这一行，
     不该被当成"拒绝"。
 
-    返回字符串而不是抛异常，是因为三个 AI 命令的既有风格是"打 stderr + return 2"，
+    返回字符串而不是抛异常，是因为四个 AI 命令的既有风格是"打 stderr + return 2"，
     抛异常会把"用法拒绝"和"运行失败"混成一个 traceback。
+
+    ``source`` / ``prefix`` 是给复用方（``init`` 的降级提示）留的：它要把同一句话
+    当 ``note:`` 打出去，还得说清是哪一份配置文件。让调用方去 ``removeprefix`` 或
+    拼字符串，等于把这里的措辞变成别人的 API —— 改一个字就静默错位。
     """
     if force or cfg.ai.enabled is not False:
         return None
-    return (
-        "error: 该仓库的 codewiki.toml 声明 [ai] enabled = false"
+    reason = (
+        f"{source} 声明 [ai] enabled = false"
         "（项目方不要 AI 分析）；确实要跑请加 --force-ai 或置 "
         f"{ENV_FORCE_AI}=1"
     )
+    return f"error: {reason}" if prefix else reason
 
 
 def apply_trust_policy(cfg: CodewikiConfig, *, trusted: bool = False) -> TrustReport:
@@ -142,7 +153,8 @@ __all__ = [
 
 
 def load_trusted_config(path: Path, *, trusted: bool = False) -> CodewikiConfig:
-    """读配置并施加信任策略（``analyze`` / 三个 AI 命令共用的唯一入口）。
+    """读配置并施加信任策略（``analyze`` / ``ai-annotate`` / ``agent`` / ``diagram``
+    共用的唯一入口）。
 
     放在这里而不是命令层，是因为流水线（``pipeline.analyze``）也要读配置，而
     依赖方向禁止 pipeline 反向 import cli。两份实现迟早会漂：一份按信任策略

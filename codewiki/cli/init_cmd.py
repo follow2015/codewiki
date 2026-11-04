@@ -22,12 +22,15 @@ from pathlib import Path
 from codewiki.ai.client import OpenAICompatClient, resolve_base_url, resolve_model
 from codewiki.ai.deferred import DEFAULT_MODEL, DeferredClient, render_pending_report
 from codewiki.ai.draft import ai_draft
-from codewiki.config import CONFIG_FILENAME
+from codewiki.config import CONFIG_FILENAME, ConfigError, load_config
 from codewiki.graph import build_graph
 from codewiki.layering_draft import directory_draft, render_config_toml
 from codewiki.models import EdgeType
 from codewiki.repo import DEFAULT_EXCLUDES, iter_source_files, nested_repo_dirs
+from codewiki.trust import ai_denied
 from codewiki.tsaliases import detect_aliases
+
+from .context import force_ai
 
 EXIT_PENDING = 3
 
@@ -183,6 +186,42 @@ def _auto_excludes(root: Path) -> list[tuple[str, str]]:
     return sorted(reasons.items())
 
 
+def _repo_ai_denial(root: Path, target: Path, *, force: bool) -> str | None:
+    """仓库（或即将被覆盖的目标配置）已声明 ``[ai] enabled = false`` 时返回拒绝理由。
+
+    返回的是**理由本身**（不带 ``error:`` 前缀、写明是哪份配置文件）：显式 ``--ai``
+    要打成错误、默认路径要打成 ``note:``，前缀由调用方决定 —— 让这里返回一整行
+    stderr、再让另一处 ``removeprefix`` 剥掉，等于把措辞变成隐式接口。
+
+    ``init --ai`` 默认只要能解析出模型就会把**路径与依赖关系**发给模型，而此前它是
+    AI 命令里唯一不读配置的 —— 项目方写了"不要 AI"，操作者在仓库里跑一句
+    ``init --src . --force`` 照样发出去。
+
+    候选三处，任一命中即拒：``--src`` 根、**当前目录**、即将写入的目标文件。
+    cwd 不能少：另三个 AI 命令读的就是 ``cwd/codewiki.toml``，少了它，站在被
+    opt-out 的仓库根、把 ``--src`` 指向子目录（``--src app``）就能绕过去 ——
+    同一个仓库，"ai-annotate 拒绝、init 放行"这种漂移正是 ``trust.py`` 开头警告的。
+    三个候选的先后只影响错误信息里写的文件名，不影响是否拒绝。
+
+    读不出来的配置（语法错）不算声明：它正要被覆盖，因为它报错而拒绝重生成反而
+    堵死了修复路径。
+    """
+    seen: set[Path] = set()
+    for path in (root / CONFIG_FILENAME, Path.cwd() / CONFIG_FILENAME, target):
+        resolved = path.resolve()
+        if resolved in seen or not resolved.is_file():
+            continue
+        seen.add(resolved)
+        try:
+            cfg = load_config(resolved)
+        except ConfigError:
+            continue
+        denied = ai_denied(cfg, force=force, source=str(resolved), prefix=False)
+        if denied:
+            return denied
+    return None
+
+
 def _client_for(args: argparse.Namespace):  # noqa: ANN202 - OpenAICompatClient | DeferredClient
     """按 ``--deferred`` / ``--model`` 装配 client；缺参数时返回 ``(None, 错误文案)``。"""
     deferred_root = Path(args.deferred).resolve() if args.deferred else None
@@ -257,6 +296,14 @@ def init(args: argparse.Namespace) -> int:
         return 2
 
     use_ai = args.ai is not False
+    if use_ai:
+        denied = _repo_ai_denial(root, target, force=force_ai(args))
+        if denied:
+            if args.ai:
+                print(f"error: {denied}", file=sys.stderr)
+                return 2
+            print(f"note: {denied}；改用目录起草", file=sys.stderr)
+            use_ai = False
     client = None
     if use_ai:
         client, error = _client_for(args)

@@ -60,6 +60,38 @@ def _card_path(path: str) -> str:
     return f'<span class="dir">{escape_text(directory)}/</span>{escape_text(name)}'
 
 
+_SAFE_SCHEMES = frozenset({"http", "https", "mailto"})
+_SCHEME_RE = re.compile(r"^([A-Za-z][A-Za-z0-9+.\-]*):")
+_CONTROL_RE = re.compile(r"[\x00-\x20\x7f]")
+
+
+def _safe_link_target(target: str) -> bool:
+    """链接目标是否可以放进 ``href``：相对路径、锚点，或 http(s)/mailto。
+
+    链接文本与目标来自被分析仓库的 docstring / 注解 / 层名 —— **不可信**。``javascript:``
+    链接点一下就在站点来源下执行脚本；``[^)\\s]+`` 排除了括号和空白，但
+    ``javascript:location=...`` 这类不带括号的载荷照样有效，所以必须按 scheme 白名单挡。
+    含控制字符的一律拒绝：浏览器解析 URL 时会先剥掉前导 C0 控制符，``\\x01javascript:`` 在
+    "按首字符判断是不是 scheme"的检查里是相对路径，在浏览器里却是 javascript:。
+
+    **前置条件**：``target`` 是 ``md_to_html`` 先整体 ``escape_text`` 过的文本（``&`` ``<``
+    ``>`` 与引号都已成实体）。这既是"href 不会被引号逃出属性"的依据，也让本函数看到的
+    永远不是以 ``&``/``"`` 开头的原始载荷。改 ``_inline`` 的转义顺序或放宽文本语境的
+    引号（``escape.py`` docstring 里那条待办）会同时动到这里 —— 那时必须重新论证。
+    """
+    if _CONTROL_RE.search(target):
+        return False
+    match = _SCHEME_RE.match(target)
+    return match is None or match.group(1).lower() in _SAFE_SCHEMES
+
+
+def _link(match: re.Match[str]) -> str:
+    label, target = match.group(1), match.group(2)
+    if not _safe_link_target(target):
+        return label
+    return f'<a href="{_href(target)}">{label}</a>'
+
+
 def _inline(text: str) -> str:
     """行内规则：code / 链接 / 粗体。
 
@@ -67,6 +99,7 @@ def _inline(text: str) -> str:
     链接规则改写。签名里写 ``**kwargs`` 时若让粗体先跑，``**`` 会成对匹配到
     别处，把签名咬出半个 ``<strong>``。
     """
+    text = text.replace("\x00", "")
     spans: list[str] = []
 
     def stash(match: re.Match[str]) -> str:
@@ -74,7 +107,7 @@ def _inline(text: str) -> str:
         return f"\x00{len(spans) - 1}\x00"
 
     text = _CODE_RE.sub(stash, text)
-    text = _LINK_RE.sub(lambda m: f'<a href="{_href(m.group(2))}">{m.group(1)}</a>', text)
+    text = _LINK_RE.sub(_link, text)
     text = _BOLD_RE.sub(r"<strong>\1</strong>", text)
     for i, span in enumerate(spans):
         text = text.replace(f"\x00{i}\x00", f"<code>{span}</code>")

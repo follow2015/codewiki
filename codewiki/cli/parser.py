@@ -55,6 +55,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_false",
         help="强制只用目录骨架（即使环境里配了 AI）",
     )
+    init_cmd.add_argument(
+        "--force-ai",
+        action="store_true",
+        help="仓库声明了 [ai] enabled = false（项目方不要 AI）时仍然执行 AI 起草",
+    )
     init_cmd.add_argument("--model", help="模型名（也可用环境变量 OPENAI_MODEL）")
     init_cmd.add_argument("--base-url", help="OpenAI 兼容网关地址（也可用 OPENAI_BASE_URL）")
     init_cmd.add_argument("--deferred", help="外置推理目录：导出请求由 agent 作答，零凭据零网络")

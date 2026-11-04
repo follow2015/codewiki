@@ -71,7 +71,8 @@ note = "下单主链路；并发限制见 run_order 的 Redis 锁。"
 [ai]
 # AI 增强总开关，三态：
 #   缺省（不写这一行）—— 不干预：AI 命令是否执行由 --model / OPENAI_MODEL 决定；
-#   enabled = false    —— 项目方声明"不要 AI 分析"：ai-annotate / agent 直接退出 2，
+#   enabled = false    —— 项目方声明"不要 AI 分析"：ai-annotate / agent / diagram /
+#                         init --ai 直接退出 2（init 未显式 --ai 时降级为目录起草），
 #                         操作者确实要跑时加 --force-ai（或 CODEWIKI_FORCE_AI=1）。
 #                         merge-annotations 不受管：它不调模型，是人工环节；
 #   enabled = true     —— 允许，但**不强制**：没有模型照样报错，端点与模型仍只认
