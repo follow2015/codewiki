@@ -36,6 +36,7 @@ TREND_POINTS = 30
 
 PACKAGE_ASSET = Path(__file__).resolve().parent.parent / "assets" / "mermaid.min.js"
 
+
 _FENCE_RE = re.compile(r"^```(\w*)\s*$")
 _TABLE_SEP_RE = re.compile(r"^\|(\s*:?-{3,}:?\s*\|)+$")
 _LINK_RE = re.compile(r"\[([^\]]+)\]\(([^)\s]+)\)")

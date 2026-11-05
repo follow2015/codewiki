@@ -24,6 +24,7 @@ from codewiki.ai.guard.secrets import redact_audit
 
 AUDIT_FILENAME = "ai-audit.jsonl"
 
+
 _SUMMARY_LIMIT = 240
 
 

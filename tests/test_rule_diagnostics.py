@@ -23,6 +23,7 @@ from codewiki.render.i18n import t
 from codewiki.render.jsonio import packet_from_parts
 from codewiki.render.site import RULES_PREVIEW_LIMIT, render_index_html
 
+
 def _packet(*, violations: int = 1):
     """api 层里有 N 个模块各 import 一次 models/user.py（每处行号不同）。
 

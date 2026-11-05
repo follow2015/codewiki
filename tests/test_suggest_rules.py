@@ -34,6 +34,7 @@ from codewiki.graph.suggest_rules import render_suggested_rules, suggest_rules
 from codewiki.models import CONF_STATIC, Edge, EdgeType, Node, NodeType
 from codewiki.render.jsonio import packet_from_parts
 
+
 def _packet(modules: dict[str, list[str]], edges: list[tuple[str, str]]):
     """``{层名: [模块路径…]}`` + ``[(src_path, dst_path)…]`` → 数据包。"""
     nodes = []
