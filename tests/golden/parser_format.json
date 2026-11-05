@@ -29,18 +29,18 @@
     "typescript": {
       "treesitter": {
         "calls": 2,
-        "digest": "f2e6d36a833accdd16318a63f73ee7d6d3d0d8d2811247258eebf79e51583c78",
-        "format_version": 2,
+        "digest": "e928bbac299527cde8500efc11f451be2176dd9a25b4c6ba4807c558faa16700",
+        "format_version": 3,
         "imports": 1,
         "inherits": 1,
-        "symbols": 5
+        "symbols": 6
       }
     },
     "go": {
       "treesitter": {
         "calls": 1,
         "digest": "33f1c6be472b1ffea0946457cbb9079b5b0d4437672bf2881a5477ad0b20ac88",
-        "format_version": 2,
+        "format_version": 3,
         "imports": 2,
         "inherits": 0,
         "symbols": 5

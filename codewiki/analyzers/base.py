@@ -24,7 +24,7 @@ from codewiki.models import FileModel
 FORMAT_VERSIONS: dict[str, int] = {
     "ast": 2,
     "regex": 2,
-    "treesitter": 2,
+    "treesitter": 3,
 }
 
 

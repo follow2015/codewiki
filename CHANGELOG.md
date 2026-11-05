@@ -11,8 +11,30 @@
   `SCHEMA_VERSION` 仍为 `1`；旧数据包可直接读取，无需升级。旧版本读取新数据包会因
   `extra=forbid` 拒绝该字段，下游消费者请先升级。
 
+### 新增
+
+- **TS/TSX 后端补全符号与依赖**（实测 Next.js 项目 131 个文件：符号 119→343、调用边 114→338、
+  `IMPORT_NAME_UNRESOLVED` 161→26；另在 ipip 前端 608 个文件上：符号 1376→3046、`CALLS` 边
+  1147→1555、未解析 710→119）。此前只认 `function` / `class` 声明，而 React 项目里组件
+  多是 `export const X = () => …` / `forwardRef(…)`，符号表近乎空白、`import { Icons }` 全部
+  落成"未解析到具体符号"。现在读入：箭头函数与 `forwardRef` / `memo` / `observer` 包装出来的组件
+  （函数）、`interface` / `type` / `enum`、导出的常量（非导出的只认全大写，与 Python 一致）；
+  只收模块级声明，闭包里的局部 `const` 不进符号表。`SymbolKind` 同步登记 `interface` /
+  `type` / `enum` 三个取值（此前只在枚举里，消费方 `SymbolKind(kind)` 会炸）。
+- **JSX 组件使用记成调用**：`<Button />` → 对 `Button` 的调用（`<Foo.Bar />` 带 receiver），
+  才有"组件依赖组件"的边；`<div>` 等内建标签不记。
+- **`import type` / `import { type X }` / `export type {…} from` 标 `type_only`**（与 Python 的
+  `TYPE_CHECKING` 同一语义：保留边、不参与环检测）。此前它们与运行时 import 混在一起，
+  TS 里类型互相引用极常见，会刷出运行时并不存在的环。
+- `FORMAT_VERSIONS["treesitter"]` 升为 `3`（TS/Go 的 FileModel 缓存失效，重跑一次即可）。
+
 ### 修复
 
+- **TS/Go 的缓存键里解析格式版本恒为 0，升 `FORMAT_VERSIONS` 对它们根本不生效**。
+  `_backend_of` 只看实例所属模块的 `BACKEND`，而 `TypeScriptAnalyzer` / `GoAnalyzer` 的
+  `BACKEND` 声明在基类 `TreeSitterAnalyzer` 的模块里，于是退回类名（`FORMAT_VERSIONS` 里没有
+  这个键）。升级后旧缓存里的 TS/Go 解析结果会一直被复用，新增的符号出不来。现在沿 MRO 查找，
+  并加了契约测试：每个已注册后端的缓存键后端名都必须在 `FORMAT_VERSIONS` 里。
 - **审计留痕断链：证据门禁丢弃的作答不留痕，长原文被截到 240 字符**。
   `ai-audit.jsonl` 此前只能溯到「谁、何时、成败」：`AI_EVIDENCE_UNSUPPORTED` /
   `AI_EVIDENCE_INVALID` / `AI_TARGET_MISMATCH` 只写进 `diagnostics`（随产物发布、

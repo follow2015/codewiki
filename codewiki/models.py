@@ -55,12 +55,21 @@ class ExternalKind(StrEnum):
 
 
 class SymbolKind(StrEnum):
-    """符号种类（Symbol 节点的 kind）。"""
+    """符号种类（Symbol 节点的 kind）。
+
+    ``interface`` / ``type`` / ``enum`` 由 TS/TSX 后端产出（Python 侧没有等价物）；
+    ``constant`` 两侧都有。``SymbolFact.kind`` 声明为 ``str`` 是为了让后端可以先于
+    枚举扩展而工作，但**新增取值时必须登记在这里** —— 否则 `SymbolKind(kind)` 会在
+    消费方炸掉，而这个枚举本身就成了误导。
+    """
 
     CLASS = "class"
     FUNCTION = "function"
     METHOD = "method"
     CONSTANT = "constant"
+    INTERFACE = "interface"
+    TYPE = "type"
+    ENUM = "enum"
 
 
 _EXTRA_FORBID = ConfigDict(extra="forbid")
@@ -143,7 +152,7 @@ class ImportFact(BaseModel):
 
 
 class SymbolFact(BaseModel):
-    """一个符号的定义事实（类/函数/方法/常量）。"""
+    """一个符号的定义事实（类/函数/方法/常量/接口/类型别名/枚举）。"""
 
     model_config = _EXTRA_FORBID
 

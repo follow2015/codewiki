@@ -84,11 +84,18 @@ class AnalyzeRequest:
 def _backend_of(analyzer) -> str:  # noqa: ANN001
     """实际生效的后端名（``auto`` 要解析到真身），用于缓存键与诊断。
 
-    各后端模块都声明了模块级 ``BACKEND``；取不到就退回类名（宁可缓存永不命中，
+    各后端模块都声明了模块级 ``BACKEND``；子类（``TypeScriptAnalyzer`` / ``GoAnalyzer``）
+    自己的模块没有声明、BACKEND 在基类 ``TreeSitterAnalyzer`` 的模块里，所以要沿 MRO 找。
+    只看实例所属模块的话，TS/Go 会退回类名 —— ``FORMAT_VERSIONS`` 里没有这个键，
+    解析格式版本恒为 0，**升版本号根本不会让它们的缓存失效**。取不到才退回类名（宁可缓存永不命中，
     也不要让两个后端共用一份缓存）。
     """
-    module = sys.modules.get(type(analyzer).__module__)
-    return str(getattr(module, "BACKEND", type(analyzer).__name__))
+    for cls in type(analyzer).__mro__:
+        module = sys.modules.get(cls.__module__)
+        backend = getattr(module, "BACKEND", None)
+        if backend:
+            return str(backend)
+    return type(analyzer).__name__
 
 
 def _order_by_dependencies(layers: list[LayerSpec], result) -> list[LayerSpec]:

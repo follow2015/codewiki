@@ -22,7 +22,8 @@
 ## 环境基线
 
 - Python **>= 3.14**（`requires-python` 安装期拦截）
-- 可选：tree-sitter extra（TS/Go 后端）、OpenAI 兼容端点（AI 层）
+- 可选：tree-sitter extra（**TS/JS/Go 后端，前端代码必须装它**：`pip install 'codewiki[treesitter]'`，
+  没装时这些文件整片被跳过）、OpenAI 兼容端点（AI 层）
 
 ## 快速开始
 
