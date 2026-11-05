@@ -30,6 +30,7 @@ class Diagnostic(BaseModel):
     code: str = Field(description="稳定的诊断码，如 LAYER_CYCLE")
     message: str
     where: str | None = Field(default=None, description="文件:行 或 节点 id")
+    rule_id: str | None = Field(default=None, description="规则违例所属的规则 id")
 
 
 class Annotation(BaseModel):

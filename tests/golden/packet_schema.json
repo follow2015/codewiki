@@ -59,6 +59,19 @@
           "title": "Message",
           "type": "string"
         },
+        "rule_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "规则违例所属的规则 id",
+          "title": "Rule Id"
+        },
         "where": {
           "anyOf": [
             {

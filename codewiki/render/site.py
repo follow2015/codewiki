@@ -17,17 +17,22 @@ import re
 import zipfile
 from pathlib import Path
 
+from codewiki.graph.history import HistoryEntry
+from codewiki.graph.rules import RULE_NOT_EFFECTIVE, RULE_VIOLATION, RULES_EVALUATED
 from codewiki.layering import UNLAYERED_LAYER_ID
 from codewiki.models import NodeType
 from codewiki.render.diagrams import build_slug_map
 from codewiki.render.escape import escape_attr, escape_text
 from codewiki.render.i18n import html_lang, t
 from codewiki.render.layer_map import layer_anchor, layer_color, render_layer_map_svg
+from codewiki.render.stats import displayed_stats
 from codewiki.render.wiki import MODULES_SUBDIR
 from codewiki.schemas import DataPacket, Diagnostic
 
 INDEX_HTML = "index.html"
 MERMAID_ASSET = "assets/mermaid.min.js"
+
+TREND_POINTS = 30
 
 PACKAGE_ASSET = Path(__file__).resolve().parent.parent / "assets" / "mermaid.min.js"
 
@@ -305,6 +310,51 @@ _PAGE_STYLES = """  :root {
   @media (prefers-color-scheme: dark) {
     .chip.err { color: #f87171; border-color: #7f1d1d; background: #2a1215; }
   }
+
+  /* ── rules (rule violations) ── */
+  .rules { margin: .2rem 0 1.6rem; }
+  .rule-block {
+    background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius);
+    box-shadow: var(--shadow); padding: .75rem 1rem; margin: 0 0 .6rem;
+  }
+  .rule-block h3 {
+    display: flex; align-items: center; gap: .5rem;
+    font-size: .88rem; font-weight: 600; margin: 0 0 .5rem;
+  }
+  .rule-block .hits { margin: 0; padding: 0; list-style: none; font-size: .82rem; }
+  .rule-block .hits li { padding: .15rem 0; border-top: 1px dashed var(--border); }
+  .rule-block .hits li:first-child { border-top: none; }
+  .rule-block .hint, .rules .hint { color: var(--muted); font-size: .8rem; margin-left: .5rem; }
+  .rule-block .more, .rules-ok, .rules-incomplete {
+    font-size: .82rem; color: var(--muted); margin: .45rem 0 0;
+  }
+  .rules-incomplete { color: #b45309; }
+  .chip.warn { color: #b45309; border-color: #fde68a; background: #fffbeb; }
+  @media (prefers-color-scheme: dark) {
+    .chip.warn { color: #fbbf24; border-color: #78350f; background: #2a1d0b; }
+    .rules-incomplete { color: #fbbf24; }
+  }
+
+  /* ── trend (architecture history) ── */
+  .trend {
+    background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius);
+    box-shadow: var(--shadow); padding: .8rem 1rem .6rem; margin: .2rem 0 1.6rem;
+  }
+  .trend-svg { display: block; width: 100%; height: auto; }
+  .trend-line-a { stroke: var(--accent); }
+  .trend-line-a-dot { fill: var(--accent); }
+  .trend-line-a-label { fill: var(--accent-text); font: 600 11px var(--mono); }
+  .trend-line-b { stroke: var(--faint); }
+  .trend-line-b-dot { fill: var(--faint); }
+  .trend-line-b-label { fill: var(--muted); font: 600 11px var(--mono); }
+  .trend-axis { fill: var(--faint); font: 10px var(--mono); }
+  .trend-legend {
+    display: flex; flex-wrap: wrap; gap: .4rem .9rem;
+    font-size: .8rem; color: var(--muted); margin: .2rem 0 0;
+  }
+  .trend-item b { color: var(--text); font-family: var(--mono); }
+  .trend-delta { font-family: var(--mono); font-size: .75rem; color: var(--accent-text); }
+  .trend-note { font-size: .78rem; color: var(--faint); margin: .4rem 0 0; }
 
   /* ── toolbar (search) ── */
   .layer-map {
@@ -632,7 +682,194 @@ def prune_stale_pages(out_dir: Path, valid_stems: set[str], *, with_diagrams: bo
     return removed
 
 
-def render_index_html(packet: DataPacket) -> str:
+RULES_PREVIEW_LIMIT = 8
+
+
+def _trend_section(history: list[HistoryEntry] | None) -> str:
+    """首页「架构趋势」段；不足两轮返回空串（整段不出现）。
+
+    一个点画不出趋势 —— 画出来只会被读成"架构一直没变"，而真相是"还不知道"。
+    这条与"没检查规则"不能留白是同一种病：**留白会被当成结论**。
+
+    图里只画两条线（模块数、层间依赖）且**共用一条纵轴**，轴上只标最大值与最小
+    值。曾经想给每条线各自归一化 —— 那样哪怕只多 1 个模块也会画成满屏斜线，形状
+    永远"看起来变化很大"，而读者无从知道到底是 1 个还是 100 个。共用轴之后两条
+    线的相对高度就是真实比例。精确读数看下面的数字（图例里带相对上一轮的差值）。
+    """
+    rows = (history or [])[-TREND_POINTS:]
+    if len(rows) < 2:
+        return ""
+
+    latest, previous = rows[-1], rows[-2]
+    series = [
+        ("site.trend_modules", [row.counts.get("modules", 0) for row in rows], "trend-line-a", "solid"),
+        (
+            "site.trend_layer_edges",
+            [row.counts.get("layer_edges", 0) for row in rows],
+            "trend-line-b",
+            "dashed",
+        ),
+    ]
+    legend = "".join(
+        _trend_legend(key, latest.counts.get(name, 0), previous.counts.get(name, 0))
+        for key, name in (
+            ("site.trend_files", "files"),
+            ("site.trend_modules", "modules"),
+            ("site.trend_layer_edges", "layer_edges"),
+            ("site.trend_layers", "layers"),
+            ("site.trend_layer_cycles", "layer_cycles"),
+            ("site.trend_module_cycles", "module_cycles"),
+        )
+    )
+    legend += _trend_legend(
+        "site.trend_violations",
+        latest.violations.get("error", 0),
+        previous.violations.get("error", 0),
+    )
+
+    svg = _trend_svg(series, rows)
+    note = t("site.trend_note", count=len(rows), limit=TREND_POINTS)
+    return (
+        f'  <h2 id="trend">{t("site.trend")}</h2>\n  <div class="trend">\n'
+        f'{svg}\n    <div class="trend-legend">{legend}</div>\n'
+        f'    <p class="trend-note">{note}</p>\n  </div>'
+    )
+
+
+def _trend_legend(key: str, value: int, previous: int) -> str:
+    delta = value - previous
+    mark = ""
+    if delta:
+        mark = f' <span class="trend-delta">{delta:+d}</span>'
+    return f'<span class="trend-item">{t(key)} <b>{value}</b>{mark}</span>'
+
+
+def _trend_svg(series: list[tuple[str, list[int], str, str]], rows: list[HistoryEntry]) -> str:
+    """两条折线的内联 SVG：**共用一条纵轴**（标上下界），横轴只标首末日期。"""
+    width, height = 660, 150
+    pad_left, pad_right, pad_top, pad_bottom = 34, 64, 12, 22
+    plot_w = width - pad_left - pad_right
+    plot_h = height - pad_top - pad_bottom
+    count = len(rows)
+    last = count - 1
+
+    low = min(min(values) for _key, values, _css, _dash in series)
+    high = max(max(values) for _key, values, _css, _dash in series)
+    span = high - low
+
+    parts: list[str] = []
+    for _key, values, css_class, dash in series:
+        points = []
+        for index, value in enumerate(values):
+            x = pad_left + plot_w * index / last
+            y = pad_top + plot_h * (1 - (value - low) / span) if span else pad_top + plot_h / 2
+            points.append((x, y))
+        path = " ".join(f"{x:.1f},{y:.1f}" for x, y in points)
+        dash_attr = ' stroke-dasharray="5 4"' if dash == "dashed" else ""
+        parts.append(
+            f'    <polyline class="{css_class}" points="{path}" fill="none"'
+            f'{dash_attr} stroke-width="2" stroke-linecap="round" />'
+        )
+        end_x, end_y = points[-1]
+        parts.append(f'    <circle class="{css_class}-dot" cx="{end_x:.1f}" cy="{end_y:.1f}" r="3.5" />')
+        parts.append(
+            f'    <text class="{css_class}-label" x="{end_x + 8:.1f}" y="{end_y + 4:.1f}">{values[-1]}</text>'
+        )
+
+    if span:
+        parts.append(
+            f'    <text class="trend-axis" x="{pad_left - 6}" y="{pad_top + 4}" text-anchor="end">{high}</text>'
+        )
+        parts.append(
+            f'    <text class="trend-axis" x="{pad_left - 6}" y="{pad_top + plot_h + 4}"'
+            f' text-anchor="end">{low}</text>'
+        )
+
+    first_date = rows[0].generated_at[:10]
+    last_date = rows[-1].generated_at[:10]
+    parts.append(
+        f'    <text class="trend-axis" x="{pad_left}" y="{height - 6}">{escape_text(first_date)}</text>'
+    )
+    parts.append(
+        f'    <text class="trend-axis" x="{width - pad_right}" y="{height - 6}" text-anchor="end">'
+        f"{escape_text(last_date)}</text>"
+    )
+    return (
+        f'    <svg class="trend-svg" viewBox="0 0 {width} {height}" role="img"'
+        f' aria-label="{escape_attr(t("site.trend"))}">\n' + "\n".join(parts) + "\n    </svg>"
+    )
+
+
+def _rules_section(packet: DataPacket, slug_map: dict[str, str]) -> str:
+    """首页「规则违例」段；本轮没跑过规则就返回空串（整段不出现）。
+
+    三种状态必须分得开：**有违例** / **检查过且干净** / **有规则没生效**。
+    混成两态的直接后果是"规则恒不命中"被当成"架构干净" —— 那也是 ``check``
+    要把"未生效"算成错误的原因。
+    """
+    if not any(d.code == RULES_EVALUATED for d in packet.diagnostics):
+        return ""
+
+    violations = [d for d in packet.diagnostics if d.code == RULE_VIOLATION]
+    problems = [d for d in packet.diagnostics if d.code == RULE_NOT_EFFECTIVE]
+
+    groups: dict[str, list[Diagnostic]] = {}
+    for item in violations:
+        groups.setdefault(item.rule_id or "?", []).append(item)
+
+    if violations:
+        ordered = sorted(groups.items(), key=_rule_sort_key)
+        body = "\n".join(_rule_block(rule_id, items, slug_map) for rule_id, items in ordered)
+    else:
+        body = ""
+        if not problems:
+            body = f'    <p class="rules-ok">{t("site.rules_ok")}</p>'
+
+    if problems:
+        body += f'\n    <p class="rules-incomplete">{t("site.rules_incomplete")}</p>'
+        body += "".join(f'\n    <p class="hint">{escape_text(d.message)}</p>' for d in problems)
+
+    return f'  <h2 id="rules">{t("site.rules")}</h2>\n  <div class="rules">\n{body}\n  </div>'
+
+
+def _rule_sort_key(item: tuple[str, list[Diagnostic]]) -> tuple[int, str]:
+    rule_id, items = item
+    return (0 if any(d.level == "error" for d in items) else 1, rule_id)
+
+
+def _rule_block(rule_id: str, items: list[Diagnostic], slug_map: dict[str, str]) -> str:
+    level = "error" if any(d.level == "error" for d in items) else "warning"
+    rows = "".join(_hit_html(item, slug_map) for item in items[:RULES_PREVIEW_LIMIT])
+    more = ""
+    if len(items) > RULES_PREVIEW_LIMIT:
+        more = f'\n      <p class="more">{t("site.rule_more", count=len(items) - RULES_PREVIEW_LIMIT)}</p>'
+    return (
+        f'    <div class="rule-block" data-rule="{escape_attr(rule_id)}" '
+        f'data-level="{level}" data-hits="{len(items)}">\n'
+        f"      <h3><code>{escape_text(rule_id)}</code>"
+        f'<span class="chip {"err" if level == "error" else "warn"}">{level}</span>'
+        f'<span class="count">{len(items)}</span></h3>\n'
+        f'      <ul class="hits">{rows}</ul>{more}\n'
+        f"    </div>"
+    )
+
+
+def _hit_html(item: Diagnostic, slug_map: dict[str, str]) -> str:
+    """一条违例：``文件:行`` 链到模块页，后面跟一句细节。
+
+    ``where`` 指不到任何模块时**只写文本**：拼出来的链接必定 404，而"点开是死的"
+    比"没有链接"更让人怀疑产物坏了。
+    """
+    where = item.where or ""
+    slug = slug_map.get(where.split(":", 1)[0]) if where else None
+    location = f"<code>{escape_text(where)}</code>" if where else ""
+    if slug:
+        location = f'<a href="{MODULES_SUBDIR}/{escape_attr(slug)}.html">{location}</a>'
+    hint = f'<span class="hint">{escape_text(item.message)}</span>' if item.message else ""
+    return f"\n        <li>{location}{hint}</li>"
+
+
+def render_index_html(packet: DataPacket, *, history: list[HistoryEntry] | None = None) -> str:
     """生成 index.html（自包含、无需服务端）。
 
     架构总览 = 分层架构地图（内联 SVG，见 ``render/layer_map.py``）——
@@ -679,12 +916,10 @@ def render_index_html(packet: DataPacket) -> str:
     ordered_ids = sorted(groups, key=lambda g: (layer_orders.get(g, 10_000), g == UNLAYERED_LAYER_ID, g))
     sections = "\n".join(_group_html(lid, groups[lid]) for lid in ordered_ids)
 
-    errors = [d for d in packet.diagnostics if d.level == "error"]
-    err_chip = f'<span class="chip err"><b>{len(errors)}</b> error</span>' if errors else ""
-    chips = (
-        f'<span class="chip"><b>{len(modules)}</b> {t("site.chip_modules")}</span>'
-        f'<span class="chip"><b>{len(packet.nodes)}</b> {t("site.chip_nodes")}</span>'
-        f'<span class="chip"><b>{len(packet.edges)}</b> {t("site.chip_edges")}</span>{err_chip}'
+    chips = "".join(
+        f'<span class="chip{" err" if key == "site.chip_errors" and value else ""}">'
+        f"<b>{value}</b> {t(key)}</span>"
+        for key, value in displayed_stats(packet)
     )
     layers_meta = "".join(
         f'<span class="chip layer" style="--c:{layer_color(layer_names[lid])}"><i></i>'
@@ -698,6 +933,9 @@ def render_index_html(packet: DataPacket) -> str:
         if layer_map_svg
         else ""
     )
+
+    rules_block = _rules_section(packet, slug_map)
+    trend_block = _trend_section(history)
 
     return f"""<!doctype html>
 <html lang="{html_lang()}">
@@ -717,6 +955,8 @@ def render_index_html(packet: DataPacket) -> str:
     <p class="links"><a href="data/codewiki.json">{t("site.data_packet")}</a> · <a href="diagnostics.html">{t("site.diagnostics")}</a></p>
   </header>
 {overview_block}
+{trend_block}
+{rules_block}
   <div class="toolbar">
     <input id="module-search" type="search" placeholder="{t("site.search_placeholder")}" />
   </div>

@@ -16,13 +16,22 @@ from codewiki.render.i18n import t
 from codewiki.schemas import Diagnostic
 
 
+def format_diagnostic_line(item: Diagnostic) -> str:
+    """一条诊断的 Markdown 行。
+
+    ``diagnostics.md`` 与 ``ARCHITECTURE.md`` 共用这一处：两处各写一遍，迟早一边
+    加了 ``where`` 一边没加 —— 而 ``where`` 正是"改哪一行"的唯一线索。
+    """
+    where = f"（{item.where}）" if item.where else ""
+    return f"- **{item.level}** `{item.code}` {where}：{item.message}"
+
+
 def write_diagnostics_md(out_dir: Path, diagnostics: list[Diagnostic]) -> None:
     """把诊断写成人类可读的最小清单（无诊断时也落一行说明，不写空文件）。"""
     lines = [t("diagnostics.title"), ""]
     if not diagnostics:
         lines.append(t("diagnostics.empty"))
     for item in diagnostics:
-        where = f"（{item.where}）" if item.where else ""
-        lines.append(f"- **{item.level}** `{item.code}` {where}：{item.message}")
+        lines.append(format_diagnostic_line(item))
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / "diagnostics.md").write_text("\n".join(lines) + "\n", encoding="utf-8")

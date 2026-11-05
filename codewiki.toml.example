@@ -68,6 +68,36 @@ target = "mod::app/services/order.py"
 label = "订单核心"
 note = "下单主链路；并发限制见 run_order 的 Redis 锁。"
 
+# ── 架构规则（由 `codewiki check` 求值，不影响 analyze 产物）───────────────────
+# 声明"谁不许依赖谁"，让架构在 CI 里被守住，而不是只在报告里被描述。
+#
+# 目标写法三种：layer:<层名>（须与上面 [[architecture.layers]] 的 name 一致）
+#              dir:<路径前缀>   module:<模块路径>
+# 违例身份 = (规则 id, 源模块, 宿模块, 边类型)，**不含行号** —— 行号随无关改动漂移，
+# 拿它当身份会让基线每天都失效，最后没人再用基线。
+# 层名改了就换了一层：改层名 = 换身份，基线会整体失效，别指望它自动跟上。
+[[rules]]
+id = "no-api-to-persistence"       # 稳定身份：基线按它记账，改 id = 换一条新规则
+kind = "forbid-dependency"
+from = "layer:接口层"
+to = "layer:数据层"
+severity = "error"                 # error 影响退出码；warning 只进报告
+reason = "接口层不得直连持久化，改走服务层"
+
+# 环规则：scope 范围内的模块之间不许有环。环看的是**全类型**边，
+# 所以这里写 edges 是无效配置（会被拒绝，而不是静默忽略）。
+[[rules]]
+id = "no-service-cycles"
+kind = "forbid-cycle"
+scope = "layer:服务层"
+severity = "warning"
+
+# 只算 import、不算调用是默认行为；要看调用边请显式写：
+#   edges = ["IMPORTS", "CALLS"]
+# TYPE_CHECKING 下的类型依赖默认计入但降级为 warning（规则算耦合度，
+# 与"环算运行时可达性"的口径故意不同）：
+#   type_only = "warn"   # warn | ignore | error
+
 [ai]
 # AI 增强总开关，三态：
 #   缺省（不写这一行）—— 不干预：AI 命令是否执行由 --model / OPENAI_MODEL 决定；

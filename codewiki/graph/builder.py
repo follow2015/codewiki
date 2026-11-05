@@ -55,6 +55,8 @@ JS_INDEXES: tuple[str, ...] = (
     "/index.jsx",
 )
 
+_JS_LANGUAGES = frozenset({"typescript", "tsx", "javascript", "jsx"})
+
 
 def module_id(path: str) -> str:
     """Module 的稳定 ID（§2.3）。"""
@@ -180,6 +182,9 @@ class GraphBuilder:
         """
         if self.inferred_root_packages:
             return
+        langs = self._languages()
+        if "python" not in langs and not (langs & _JS_LANGUAGES):
+            return
         internal = external = 0
         for e in self.edges:
             if e.type != EdgeType.IMPORTS or not e.source.startswith("mod::"):
@@ -197,11 +202,29 @@ class GraphBuilder:
                 code="ROOT_PACKAGE_UNKNOWN",
                 message=(
                     f"{total} 条模块级 import 里只有 {internal} 条解析到仓库内文件；"
-                    "若这是个自成一体的项目，多半是 --src 选在了包内部或目录名与包名不一致。"
-                    "可调整 --src，或在 codewiki.toml 的 [analysis] 里设置 root_package。"
+                    + self._import_resolution_advice(langs)
                 ),
             )
         )
+
+    def _import_resolution_advice(self, langs: set[str]) -> str:
+        """import 整片落 external 时按语言给下一步（成因不同，处置也不同）。"""
+        advice: list[str] = []
+        if "python" in langs:
+            advice.append(
+                "Python 侧多半是 --src 选在了包内部或目录名与包名不一致，可调整 --src，"
+                "或在 codewiki.toml 的 [analysis] 里设置 root_package。"
+            )
+        if langs & _JS_LANGUAGES:
+            advice.append(
+                "前端侧多半是路径别名没进配置：若用 @/x 这类别名，请在 [analysis] ts_aliases 里填写"
+                "（codewiki init 可按 tsconfig 的 paths 自动带出）。"
+            )
+        return "若这是个自成一体的项目，" + "".join(advice)
+
+    def _languages(self) -> set[str]:
+        """本次分析实际出现的语言集合（按文件，不看配置）。"""
+        return {f.language for f in self._files.values() if f.language}
 
     def _warn_missing_layer_dependency(self) -> None:
         """配了多层却一条层间依赖都没有 —— 几乎必然是 import 整体没解析出来。
@@ -225,11 +248,7 @@ class GraphBuilder:
             return
         if any(e.type == EdgeType.LAYER_DEPENDS for e in self.edges):
             return
-        hint = (
-            f"若代码写的是 from {self.root_package}.x import Y，请让 --src 指向该包根（而不是包内子目录）"
-            if self.root_package
-            else ""
-        )
+        hint = self._layer_dependency_hints()
         self.diagnostics.append(
             Diagnostic(
                 level="warning",
@@ -239,6 +258,43 @@ class GraphBuilder:
                     f"跨文件 import 很可能整体未解析，架构图的层间关系不可信。{hint}"
                 ),
             )
+        )
+
+    def _layer_dependency_hints(self) -> str:
+        """按**实际出现的语言**给排障提示。
+
+        这条诊断的成因逐语言不同：Python 多半是 ``--src`` 指进了包内（绝对导入
+        ``from pkg.x import Y`` 落空），TS/JS 多半是 ``@/x`` 别名没进
+        ``[analysis] ts_aliases``。写死一句 Python 句式，TS/Go 用户会去调
+        ``--src`` 而这并不是原因 —— 报了问题却把人指向错误的方向，比不报更难查。
+        """
+        present = self._languages()
+        hints: list[str] = []
+        if "python" in present:
+            hints.append(self._python_import_hint())
+        if present & _JS_LANGUAGES:
+            hints.append(
+                "若前端用 @/x 这类路径别名，请在 codewiki.toml 的 [analysis] ts_aliases 里配置"
+                "（codewiki init 可按 tsconfig 的 paths 自动带出）。"
+            )
+        if "go" in present:
+            hints.append(
+                "Go 的 import 是模块全路径（形如 example.com/mod/pkg/x，指 go.mod 的 module 声明），"
+                "本版本还没有把它映射到仓库内文件；这是已知缺口，调整 --src 也不会让这些边出现。"
+            )
+        if not hints:
+            hints.append("请确认 --src 指向工程根目录。")
+        return "".join(hints)
+
+    def _python_import_hint(self) -> str:
+        if self.root_package:
+            return (
+                f"若代码写的是 from {self.root_package}.x import Y，"
+                "请让 --src 指向该包根（而不是包内子目录）。"
+            )
+        return (
+            "若是 Python 绝对导入（代码写 from <包>.x import Y），请让 --src 指向包含该包的目录，"
+            "或在 codewiki.toml 的 [analysis] 里设置 root_package。"
         )
 
     def _index_symbols(self, files: list[FileModel]) -> None:
@@ -360,11 +416,17 @@ class GraphBuilder:
         for file in files:
             mid = module_id(file.path)
             for imp in file.imports:
+                where = f"{file.path}:{imp.lineno}"
                 if imp.is_star:
                     target_module = self._resolve_module_path(imp.module, from_module=file.path)
                     if target_module:
                         self._edge(
-                            mid, module_id(target_module), EdgeType.IMPORTS, weight=1, type_only=imp.type_only
+                            mid,
+                            module_id(target_module),
+                            EdgeType.IMPORTS,
+                            evidence=where,
+                            weight=1,
+                            type_only=imp.type_only,
                         )
                     continue
 
@@ -375,6 +437,7 @@ class GraphBuilder:
                             mid,
                             module_id(target_module),
                             EdgeType.IMPORTS,
+                            evidence=where,
                             alias=imp.alias,
                             weight=1,
                             type_only=imp.type_only,
@@ -384,6 +447,7 @@ class GraphBuilder:
                             mid,
                             self._external(imp.module or ""),
                             EdgeType.IMPORTS,
+                            evidence=where,
                             alias=imp.alias,
                             type_only=imp.type_only,
                         )
@@ -394,14 +458,24 @@ class GraphBuilder:
                     owner = self._owner_module(source)
                     if owner and owner != file.path:
                         self._edge(
-                            mid, module_id(owner), EdgeType.IMPORTS, alias=imp.alias, type_only=imp.type_only
+                            mid,
+                            module_id(owner),
+                            EdgeType.IMPORTS,
+                            evidence=where,
+                            alias=imp.alias,
+                            type_only=imp.type_only,
                         )
                     continue
 
                 submodule = self._resolve_submodule(imp.module, imp.name, from_module=file.path)
                 if submodule:
                     self._edge(
-                        mid, module_id(submodule), EdgeType.IMPORTS, alias=imp.alias, type_only=imp.type_only
+                        mid,
+                        module_id(submodule),
+                        EdgeType.IMPORTS,
+                        evidence=where,
+                        alias=imp.alias,
+                        type_only=imp.type_only,
                     )
                     continue
 
@@ -411,6 +485,7 @@ class GraphBuilder:
                         mid,
                         module_id(target_module),
                         EdgeType.IMPORTS,
+                        evidence=where,
                         alias=imp.alias,
                         type_only=imp.type_only,
                     )
@@ -427,6 +502,7 @@ class GraphBuilder:
                         mid,
                         self._external(imp.module or ""),
                         EdgeType.IMPORTS,
+                        evidence=where,
                         alias=imp.alias,
                         type_only=imp.type_only,
                     )

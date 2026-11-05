@@ -28,5 +28,8 @@ def analyze(args: argparse.Namespace) -> int:
         min_confidence=args.min_confidence,
         strict=args.strict,
         timestamp=args.timestamp,
+        history=args.history,
+        no_history=args.no_history,
+        trend=args.trend,
     )
     return run(request)

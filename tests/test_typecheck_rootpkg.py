@@ -15,7 +15,7 @@ from codewiki.analyzers.python_analyzer import PythonAstAnalyzer
 from codewiki.graph import build_graph
 from codewiki.graph.analysis import find_module_cycles, impact_of
 from codewiki.graph.builder import module_id
-from codewiki.models import EdgeType, FileModel
+from codewiki.models import EdgeType, FileModel, ImportFact
 from codewiki.render.jsonio import packet_from_parts
 from codewiki.render.mermaid_context import render_module_context
 from codewiki.render.mermaid_macro import render_system_context
@@ -163,6 +163,38 @@ def test_warns_when_almost_nothing_resolves_internally():
 def test_no_unknown_warning_for_a_normal_project():
     result = build_graph(_pkg_files("src"), root_package="src")
     assert not any(d.code == "ROOT_PACKAGE_UNKNOWN" for d in result.diagnostics)
+
+
+def _lang_model(path: str, language: str, module: str) -> FileModel:
+    """造一条"只知道 import、不知道落点"的事实（不经分析器，避免依赖 tree-sitter）。"""
+    return FileModel(
+        path=path,
+        language=language,
+        hash="",
+        imports=[ImportFact(module=module, lineno=1)],
+    )
+
+
+def test_go_only_repo_never_gets_the_python_src_advice():
+    """Go 的 import 天生就是模块全路径、几乎全部落 external。
+
+    此时"只有 0 条解析到仓库内文件 ⇒ 多半是 --src 选错"是**错误归因**：用户可以
+    把 --src 试遍全仓也不会好。纯 Go 仓不该出这条诊断。
+    """
+    files = [_lang_model(f"pkg/m{i}.go", "go", "example.com/demo/internal/core") for i in range(60)]
+    result = build_graph(files)
+    assert not [d for d in result.diagnostics if d.code == "ROOT_PACKAGE_UNKNOWN"], result.diagnostics
+
+
+def test_typescript_repo_gets_alias_advice_instead_of_root_package():
+    """前端整片落 external 是别名没进配置，不是 Python 的包根问题。"""
+    files = [_lang_model(f"src/m{i}.ts", "typescript", "@/core/s") for i in range(60)]
+    result = build_graph(files)
+
+    hits = [d for d in result.diagnostics if d.code == "ROOT_PACKAGE_UNKNOWN"]
+    assert len(hits) == 1, result.diagnostics
+    assert "ts_aliases" in hits[0].message, hits[0].message
+    assert "root_package" not in hits[0].message, hits[0].message
 
 
 def test_type_only_edge_is_visible_to_impact_analysis():

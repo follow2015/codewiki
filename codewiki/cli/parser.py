@@ -19,6 +19,7 @@ from codewiki.layering import DEFAULT_MAX_GROUP
 from .agent_cmd import agent
 from .analyze_cmd import analyze
 from .annotate_cmd import WRITE_BACK_POLICIES, annotate
+from .check_cmd import DEFAULT_BASELINE_NAME, DEFAULT_MAX_PER_RULE, check
 from .cycles_cmd import cycles
 from .diagram_cmd import diagram
 from .diff_cmd import diff
@@ -28,6 +29,8 @@ from .import_graph_cmd import import_graph
 from .init_cmd import init
 from .merge_annotations_cmd import merge_annotations
 from .merge_layers_cmd import merge_layers
+from .merge_rules_cmd import merge_rules
+from .rules_cmd import rules
 from .serve_cmd import serve
 from .suggest_layers_cmd import suggest_layers
 
@@ -115,6 +118,22 @@ def build_parser() -> argparse.ArgumentParser:
         "--timestamp",
         help="固定 generated_at（ISO-8601 或整数秒）；也可用环境变量 SOURCE_DATE_EPOCH"
         " —— 两者都是为了让产物可复现、可逐字节比对",
+    )
+    analyze_cmd.add_argument(
+        "--history",
+        metavar="FILE",
+        help="架构趋势文件（默认 <src>/.codewiki/history.jsonl）；指向仓库内受版本控制的"
+        "路径可让趋势随代码一起共享",
+    )
+    analyze_cmd.add_argument(
+        "--no-history",
+        action="store_true",
+        help="不记架构趋势（不碰被分析仓库；只读挂载或别人的仓库用）",
+    )
+    analyze_cmd.add_argument(
+        "--trend",
+        action="store_true",
+        help="首页画架构趋势。默认关：它会让 index.html 依赖历史，产物不再逐字节可复现",
     )
     analyze_cmd.set_defaults(func=analyze)
 
@@ -213,11 +232,45 @@ def build_parser() -> argparse.ArgumentParser:
     cycles_cmd.add_argument("--out", help="顺带把每个环写成 .mmd")
     cycles_cmd.set_defaults(func=cycles)
 
+    check_cmd = sub.add_parser("check", help="按 [[rules]] 裁决已有数据包（CI 用，只读）")
+    check_cmd.add_argument("--input", default="wiki-output/data/codewiki.json", help="数据包路径")
+    check_cmd.add_argument("--config", default=CONFIG_FILENAME, help="规则所在的配置（默认 ./codewiki.toml）")
+    check_cmd.add_argument("--format", choices=("text", "json"), default="text")
+    check_cmd.add_argument(
+        "--max-per-rule",
+        type=int,
+        default=DEFAULT_MAX_PER_RULE,
+        help=f"每条规则最多列几条（默认 {DEFAULT_MAX_PER_RULE}），其余只计数",
+    )
+    check_cmd.add_argument(
+        "--baseline",
+        metavar="FILE",
+        help="基线文件（默认不用基线）：基线内的违例不报明细，只计入摘要；"
+        "与 --write-baseline 一起用时，基线写到这个路径",
+    )
+    check_cmd.add_argument(
+        "--write-baseline",
+        action="store_true",
+        help=f"把当前全部违例写成基线（默认 ./{DEFAULT_BASELINE_NAME}）：显式动作，"
+        "写完退出 0；规则没真正生效时拒绝执行",
+    )
+    check_cmd.set_defaults(func=check)
+
     diff_cmd = sub.add_parser("diff", help="变更影响分析（两个快照或 git 范围）")
     diff_cmd.add_argument("--base", help="基线数据包")
     diff_cmd.add_argument("--head", help="目标数据包")
     diff_cmd.add_argument("--input", default="wiki-output/data/codewiki.json", help="git 模式用的当前数据包")
     diff_cmd.add_argument("--src", default=".", help="git 模式用的仓库根")
+    diff_cmd.add_argument(
+        "--architecture",
+        action="store_true",
+        help="比架构历史（history.jsonl）的最后两轮：结构计数、层增删、规则违例",
+    )
+    diff_cmd.add_argument(
+        "--history",
+        metavar="FILE",
+        help="架构历史文件（默认 <--src>/.codewiki/history.jsonl，与 analyze 同源）",
+    )
     diff_cmd.add_argument("range", nargs="?", help="git 范围（如 v1.2.0..HEAD），不传则用 --base/--head")
     diff_cmd.set_defaults(func=diff)
 
@@ -237,6 +290,20 @@ def build_parser() -> argparse.ArgumentParser:
     merge_layers_cmd_parser.add_argument("--config", help=f"主配置路径（默认 ./{CONFIG_FILENAME}）")
     merge_layers_cmd_parser.add_argument("--dry-run", action="store_true", help="只打印计划，不写文件")
     merge_layers_cmd_parser.set_defaults(func=merge_layers)
+
+    rules_cmd_parser = sub.add_parser(
+        "rules", help="规则草案：按现有层间依赖与层内环生成 [[rules]]（纯静态）"
+    )
+    rules_cmd_parser.add_argument("--suggest", action="store_true", help="生成规则草案（目前唯一的动作）")
+    rules_cmd_parser.add_argument("--input", default="wiki-output/data/codewiki.json")
+    rules_cmd_parser.add_argument("--out", help="草案文件路径（不传则打到 stdout）")
+    rules_cmd_parser.set_defaults(func=rules)
+
+    merge_rules_cmd_parser = sub.add_parser("merge-rules", help="把规则草案合并进 codewiki.toml")
+    merge_rules_cmd_parser.add_argument("file", help="草案文件路径（suggestions/rules.suggest.toml）")
+    merge_rules_cmd_parser.add_argument("--config", help=f"主配置路径（默认 ./{CONFIG_FILENAME}）")
+    merge_rules_cmd_parser.add_argument("--dry-run", action="store_true", help="只打印计划，不写文件")
+    merge_rules_cmd_parser.set_defaults(func=merge_rules)
 
     serve_cmd = sub.add_parser("serve", help="本地静态预览（纯静态目录，不执行脚本）")
     serve_cmd.add_argument("--dir", default="wiki-output", help="产物目录")

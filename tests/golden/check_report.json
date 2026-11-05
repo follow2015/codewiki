@@ -1,0 +1,51 @@
+{
+  "packet": {
+    "path": "<packet>",
+    "generated_at": "2026-01-01T00:00:00Z",
+    "repo_commit": "deadbeef",
+    "tool_version": "<tool_version>"
+  },
+  "rules": {
+    "declared": 1,
+    "ids": [
+      "no-ui-infra"
+    ]
+  },
+  "summary": {
+    "error": 1,
+    "warning": 1,
+    "ignored_type_only": 0,
+    "baselined": 0
+  },
+  "violations": [
+    {
+      "rule_id": "no-ui-infra",
+      "severity": "error",
+      "src": "ui/a.py",
+      "dst": "infra/db.py",
+      "edge_type": "IMPORTS",
+      "where": "ui/a.py:3",
+      "type_only": false,
+      "message": "ui/a.py 依赖了 infra/db.py（IMPORTS 边），违反规则 no-ui-infra；改走服务层"
+    },
+    {
+      "rule_id": "no-ui-infra",
+      "severity": "warning",
+      "src": "ui/a.py",
+      "dst": "infra/db.py",
+      "edge_type": "IMPORTS",
+      "where": "ui/a.py:9",
+      "type_only": true,
+      "message": "ui/a.py 依赖了 infra/db.py（IMPORTS 边，仅类型依赖），违反规则 no-ui-infra；改走服务层"
+    }
+  ],
+  "truncated": {},
+  "ignored_type_only": {},
+  "baseline": {
+    "enabled": false,
+    "path": null,
+    "skipped": 0,
+    "stale": []
+  },
+  "problems": []
+}

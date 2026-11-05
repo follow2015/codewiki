@@ -8,7 +8,10 @@ version = "1.2.0"
 description = "配置驱动、可离线交付的代码架构知识图谱与文档生成器"
 readme = "README.md"
 license = "Apache-2.0"
-license-files = ["LICENSE"]
+# NOTICE 与 LICENSE 一并进 wheel 的 .dist-info：MIT 要求分发时附带版权声明与
+# 许可证全文，而 assets/ 里的 mermaid 与 cytoscape 都是 MIT —— 声明不进交付物
+# 等于没声明。
+license-files = ["LICENSE", "NOTICE"]
 # 运行时基线：3.11（tomllib / datetime.UTC 是用到的最低特性，外部评审指出
 # 3.14.7 下限会挡住绝大多数用户）。CI 按 3.11 / 3.14 两端验证（见 ci.yml）。
 requires-python = ">=3.11"
@@ -50,7 +53,10 @@ namespaces = false
 # （editable 安装能跑掩盖了这一点 —— 外部评审实测面）
 # .sha256 也带上：它不是运行时依赖（每次启动算 5MB 哈希太贵），而是"这份资产
 # 来自哪个上游版本"的证据，出问题时能对得上 tests/test_offline_asset_hash.py。
-codewiki = ["assets/*.js", "assets/*.sha256"]
+# ⚠️ setuptools 的 glob **不递归子目录**：`assets/*.js` 匹配不到
+# `assets/graph/cytoscape.min.js`，交互图运行时必须单列一行。漏了它源码树跑得
+# 好好的、wheel 里却没有文件（同样是 editable 安装盖住的那类坑）。
+codewiki = ["assets/*.js", "assets/*.sha256", "assets/graph/*.js", "assets/graph/*.sha256"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

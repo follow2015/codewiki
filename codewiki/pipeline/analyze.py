@@ -28,7 +28,12 @@ from codewiki.config import CONFIG_FILENAME, ConfigError, LayerSpec, derive_laye
 from codewiki.file_cache import CacheStats, FileModelCache, content_hash_of, mtime_ns_of
 from codewiki.graph import build_graph
 from codewiki.graph.analysis import diff_packets, god_node_diagnostics, module_graph_from_parts
+from codewiki.graph.history import append as append_history
+from codewiki.graph.history import build_entry as build_history_entry
+from codewiki.graph.history import default_path as default_history_path
+from codewiki.graph.history import read as read_history
 from codewiki.graph.index import build_index
+from codewiki.graph.rules import evaluate_rules, to_diagnostics
 from codewiki.layering import rank_layers
 from codewiki.models import FileModel, NodeType
 from codewiki.packetio import load_packet_or_none, packet_from_parts
@@ -40,12 +45,19 @@ from codewiki.pipeline.incremental import (
     render_inputs,
     write_incomplete_marker,
 )
+from codewiki.render.architecture_md import write_architecture_md
 from codewiki.render.diagnostics_md import write_diagnostics_md
 from codewiki.render.diagrams import render_all
+from codewiki.render.graph_page import (
+    copy_graph_asset,
+    graph_asset_diagnostics,
+    write_graph_html,
+)
 from codewiki.render.i18n import set_lang
 from codewiki.render.jsonio import write_packet
 from codewiki.render.site import (
     INDEX_HTML,
+    TREND_POINTS,
     asset_diagnostics,
     copy_offline_asset,
     prune_stale_pages,
@@ -78,6 +90,9 @@ class AnalyzeRequest:
     min_confidence: float | None = None
     strict: bool = False
     timestamp: str | None = None
+    history: str | Path | None = None
+    no_history: bool = False
+    trend: bool = False
     registry: AnalyzerRegistry | None = None
 
 
@@ -288,6 +303,11 @@ def run(request: AnalyzeRequest) -> int:
     packet.diagnostics.extend(god)
     diagnostics.extend(god)
 
+    if cfg.rules:
+        rule_diagnostics = to_diagnostics(evaluate_rules(packet, cfg.rules), declared=len(cfg.rules))
+        packet.diagnostics.extend(rule_diagnostics)
+        diagnostics.extend(rule_diagnostics)
+
     previous_snapshot = _read_previous_snapshot(out_dir) if request.incremental else None
 
     inputs = render_inputs(
@@ -332,9 +352,16 @@ def run(request: AnalyzeRequest) -> int:
 
     copy_offline_asset(out_dir, source=Path(request.offline_asset) if request.offline_asset else None)
     diagnostics.extend(asset_diagnostics(out_dir))
+    copy_graph_asset(out_dir)
+    diagnostics.extend(graph_asset_diagnostics(out_dir))
     write_diagnostics_md(out_dir, diagnostics)
-    (out_dir / INDEX_HTML).write_text(render_index_html(packet), encoding="utf-8")
+    history_rows = _record_history(request, root, packet, files=len(models))
+    write_architecture_md(out_dir, packet, history=history_rows if request.trend else None)
+    (out_dir / INDEX_HTML).write_text(
+        render_index_html(packet, history=history_rows if request.trend else None), encoding="utf-8"
+    )
     write_module_html(out_dir)
+    write_graph_html(out_dir, packet)
 
     clear_incomplete_marker(out_dir)
 
@@ -348,6 +375,34 @@ def run(request: AnalyzeRequest) -> int:
         print(f"--strict：存在 {len(errors)} 条 error 级诊断", file=sys.stderr)
         return 1
     return 0
+
+
+def _record_history(request: AnalyzeRequest, root: Path, packet, *, files: int):
+    """把本轮记进架构趋势，返回最近若干轮（含本轮）供首页画图；关闭时返回 ``None``。
+
+    三种失败都不该毁掉一轮分析 —— 历史是便利功能，不是产物的一部分：路径建不出来、
+    写不进去、读不回来。但**每一种都要说出来**：静默失败会让"趋势为什么不更新"
+    变成又一个只能靠猜的问题。
+
+    也**不**因为 ``--strict`` 之类改变行为：历史与退出码无关，它只记事实。
+
+    **记录默认开，首页画图默认关**（``request.trend``）。这不是漏掉：趋势一旦进
+    ``index.html``，产物就成了"跑了多少轮"的函数 —— 而 ``test_incremental_equals_full``
+    逐字节比对的前提正是"同一输入 ⇒ 同一产物"（增量目录跑过 N 轮、全新目录只跑 1
+    轮，趋势点数天然不同）。归档物可复现是硬约束，趋势是运行视图，要图的人显式开。
+    """
+    if request.no_history:
+        return None
+    target = Path(request.history).resolve() if request.history else default_history_path(root)
+    try:
+        append_history(target, build_history_entry(packet, files=files))
+        rows, skipped = read_history(target, limit=TREND_POINTS)
+    except OSError as exc:
+        print(f"warning: 架构趋势未记录（{target}）：{exc}", file=sys.stderr)
+        return None
+    if skipped:
+        print(f"warning: 架构趋势有 {skipped} 行无法解析，已跳过（{target}）", file=sys.stderr)
+    return rows
 
 
 def _incremental_scope(

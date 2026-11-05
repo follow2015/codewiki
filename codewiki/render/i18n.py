@@ -80,6 +80,27 @@ def t(key: str, **fmt: object) -> str:
         return text
 
 
+def t_raw(key: str) -> str:
+    """取**未填充**的文案模板，留给前端按自己的数据替换 ``{name}``。
+
+    为什么不让 ``t(key)`` 在缺参数时静默返回原文就完事：那条告警是为了抓"调用点
+    漏传参数"这种真 bug（文案改了占位符名、调用点没跟上）。同一个入口既当"取
+    模板"又当"报 bug"用，后者会被淹没在正常用法里。
+
+    当前唯一的使用者是交互图：文案要在浏览器里按每个节点各自的数字渲染，服务端
+    只能给出模板。替换在前端用 ``String.replace`` 做，键名与占位符仍由语言表定义，
+    换第三种语言时不必改 JS（语序不同也能表达）。
+    """
+    lang = _current.get()
+    text = CATALOGS[lang].get(key)
+    if text is None:
+        text = CATALOGS[DEFAULT_LANG].get(key)
+        if text is None:
+            warnings.warn(f"未知的文案键 {key!r}（语言 {lang}）", RuntimeWarning, stacklevel=2)
+            return key
+    return text
+
+
 def html_lang() -> str:
     """``<html lang="...">`` 的值。"""
     lang = _current.get()
